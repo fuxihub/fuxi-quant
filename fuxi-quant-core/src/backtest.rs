@@ -654,8 +654,8 @@ pub mod history {
         time::{Duration, sleep},
     };
 
-    const START_YEAR: i32 = 2023;
-    const START_MONTH: u32 = 7;
+    const START_YEAR: i32 = 2020;
+    const START_MONTH: u32 = 1;
 
     #[tracing::instrument(skip_all)]
     #[tokio::main(flavor = "current_thread")]
@@ -692,16 +692,14 @@ pub mod history {
                 }
 
                 let year_month_str = format!("{:04}-{:02}", year, month);
-                let zip_filename = format!("{}-{}.zip", code, year_month_str);
+                // 币安格式: BTCUSDT-1m-2020-01.zip
+                let symbol = format!("{}USDT", code);
+                let zip_filename = format!("{}-1m-{}.zip", symbol, year_month_str);
                 let save_path = PathBuf::from(dir).join("resources").join(&zip_filename);
 
-                let yyyymm = format!("{:04}{:02}", year, month);
-                // 固定使用 USDT 计价的合约
-                let url_filename =
-                    format!("{}-USDT-SWAP-candlesticks-{}.zip", code, year_month_str);
                 let url = format!(
-                    "https://static.okx.com/cdn/okex/traderecords/candlesticks/monthly/{}/{}",
-                    yyyymm, url_filename
+                    "https://data.binance.vision/data/futures/um/monthly/klines/{}/1m/{}",
+                    symbol, zip_filename
                 );
 
                 if save_path.exists() {
@@ -737,9 +735,10 @@ pub mod history {
                     break;
                 }
 
+                let symbol = format!("{}USDT", code);
                 let zip_path = PathBuf::from(dir)
                     .join("resources")
-                    .join(format!("{}-{:04}-{:02}.zip", code, year, month));
+                    .join(format!("{}-1m-{:04}-{:02}.zip", symbol, year, month));
 
                 if zip_path.exists() {
                     zip_paths.push(zip_path);
@@ -854,9 +853,10 @@ pub mod history {
                 break;
             }
 
+            let symbol = format!("{}USDT", code);
             let csv_path = PathBuf::from(dir)
                 .join("resources")
-                .join(format!("{}-{:04}-{:02}.csv", code, year, month));
+                .join(format!("{}-1m-{:04}-{:02}.csv", symbol, year, month));
 
             if csv_path.exists() {
                 csv_paths.push(csv_path);
@@ -873,17 +873,23 @@ pub mod history {
             return Ok(());
         }
 
+        // 币安 CSV 字段顺序:
+        // open_time, open, high, low, close, volume, close_time, quote_volume,
+        // count, taker_buy_volume, taker_buy_quote_volume, ignore
+        // 注意: open_time 和 close_time 在 CSV 中是字符串格式
         let schema = Arc::new(Schema::from_iter(vec![
-            Field::new("instrument_name".into(), DataType::String),
+            Field::new("open_time".into(), DataType::String),
             Field::new("open".into(), DataType::Float64),
             Field::new("high".into(), DataType::Float64),
             Field::new("low".into(), DataType::Float64),
             Field::new("close".into(), DataType::Float64),
-            Field::new("vol".into(), DataType::Float64),
-            Field::new("vol_ccy".into(), DataType::Float64),
-            Field::new("vol_quote".into(), DataType::Float64),
-            Field::new("open_time".into(), DataType::Int64),
-            Field::new("confirm".into(), DataType::Int64),
+            Field::new("volume".into(), DataType::Float64),
+            Field::new("close_time".into(), DataType::String),
+            Field::new("quote_volume".into(), DataType::Float64),
+            Field::new("count".into(), DataType::Int64),
+            Field::new("taker_buy_volume".into(), DataType::Float64),
+            Field::new("taker_buy_quote_volume".into(), DataType::Float64),
+            Field::new("ignore".into(), DataType::String),
         ]));
 
         let df = LazyCsvReader::new_paths(
@@ -893,16 +899,27 @@ pub mod history {
                 .collect::<Vec<_>>()
                 .into(),
         )
-        .with_has_header(true)
+        .with_has_header(false) // 币安 CSV 无列头
         .with_schema(Some(schema))
         .with_null_values(Some(NullValues::AllColumns(vec!["".into(), "None".into()])))
         .finish()?;
 
+        // 过滤掉可能存在的列头文本行，并将 open_time 从字符串转为 Int64
+        let df = df
+            .filter(col("open_time").neq(lit("open_time")))
+            .with_column(col("open_time").cast(DataType::Int64));
+
+        // 字段映射:
+        // open_time -> time, volume -> size, quote_volume -> cash,
+        // count -> trades, taker_buy_volume -> taker_size, taker_buy_quote_volume -> taker_cash
         let df = df
             .with_columns([
                 col("open_time").alias("time"),
-                col("vol_ccy").alias("size"),
-                col("vol_quote").alias("cash"),
+                col("volume").alias("size"),
+                col("quote_volume").alias("cash"),
+                col("count").alias("trades"),
+                col("taker_buy_volume").alias("taker_size"),
+                col("taker_buy_quote_volume").alias("taker_cash"),
             ])
             .select([
                 col("time").cast(DataType::Datetime(
@@ -915,6 +932,9 @@ pub mod history {
                 col("close"),
                 col("size"),
                 col("cash"),
+                col("trades"),
+                col("taker_size"),
+                col("taker_cash"),
             ]);
 
         let df = df.sort(["time"], SortMultipleOptions::default());
