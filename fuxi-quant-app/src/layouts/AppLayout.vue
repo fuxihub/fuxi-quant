@@ -83,7 +83,7 @@ function toggleUserMenu(event) {
   <div class="min-h-screen flex flex-col">
     <!-- 顶部菜单栏 -->
     <header
-      class="flex items-center justify-between px-4 py-2 border-b border-surface-200 dark:border-surface-700 bg-surface-0 dark:bg-surface-900">
+      class="sticky top-0 z-50 flex items-center justify-between px-4 py-2 border-b border-surface-200 dark:border-surface-700 bg-surface-0 dark:bg-surface-900">
       <!-- 左侧 Logo -->
       <div class="flex items-center gap-2">
         <svg
