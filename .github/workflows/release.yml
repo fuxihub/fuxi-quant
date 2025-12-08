@@ -118,13 +118,7 @@ jobs:
         id: version
         run: |
           VERSION="${{ inputs.version }}"
-          # 确保版本号带 v 前缀
-          if [[ ! "$VERSION" =~ ^v ]]; then
-            TAG_NAME="v${VERSION}"
-          else
-            TAG_NAME="${VERSION}"
-          fi
-          echo "tag_name=${TAG_NAME}" >> $GITHUB_OUTPUT
+          echo "tag_name=${VERSION}" >> $GITHUB_OUTPUT
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
 
       - name: 生成变更日志
