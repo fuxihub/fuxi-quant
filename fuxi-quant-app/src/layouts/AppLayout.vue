@@ -80,10 +80,10 @@ function toggleUserMenu(event) {
 </script>
 
 <template>
-  <div class="min-h-screen flex flex-col">
+  <div class="h-screen flex flex-col overflow-hidden">
     <!-- 顶部菜单栏 -->
     <header
-      class="sticky top-0 z-50 flex items-center justify-between px-4 py-2 border-b border-surface-200 dark:border-surface-700 bg-surface-0 dark:bg-surface-900">
+      class="flex-shrink-0 flex items-center justify-between px-4 py-2 border-b border-surface-200 dark:border-surface-700 bg-surface-0 dark:bg-surface-900">
       <!-- 左侧 Logo -->
       <div class="flex items-center gap-2">
         <svg
@@ -162,7 +162,7 @@ function toggleUserMenu(event) {
     </header>
 
     <!-- 主内容区域 -->
-    <main class="flex-1 p-4">
+    <main class="flex-1 overflow-auto p-4">
       <slot />
     </main>
   </div>
