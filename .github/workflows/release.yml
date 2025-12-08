@@ -101,6 +101,9 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: 获取所有 Tags
+        run: git fetch --tags --force
+
       - name: 下载所有制品
         if: ${{ !inputs.skip_build }}
         uses: actions/download-artifact@v4
