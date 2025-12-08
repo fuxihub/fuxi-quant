@@ -616,7 +616,10 @@ mod bars {
                     .or(col("low").is_null())
                     .or(col("close").is_null())
                     .or(col("size").is_null())
-                    .or(col("cash").is_null()),
+                    .or(col("cash").is_null())
+                    .or(col("trades").is_null())
+                    .or(col("taker_size").is_null())
+                    .or(col("taker_cash").is_null()),
             )
             .select([col("time").cast(DataType::Int64).alias("time_ms")])
             .collect()?;
