@@ -670,12 +670,15 @@ pub mod history {
             .build()?;
 
         for code in codes {
+            let span = tracing::info_span!("", ________topic________ = format_args!("{code}"));
+            let _guard = span.enter();
+
             let feather_path = PathBuf::from(dir)
                 .join("bars")
                 .join(format!("{}.data", code));
 
             if feather_path.exists() {
-                tracing::trace!("数据已存在: {code}");
+                tracing::trace!("数据已存在");
                 continue;
             }
 
@@ -692,6 +695,13 @@ pub mod history {
                 }
 
                 let year_month_str = format!("{:04}-{:02}", year, month);
+
+                let span = tracing::info_span!(
+                    "",
+                    ________topic________ = format_args!("{year_month_str}")
+                );
+                let _guard = span.enter();
+
                 // 币安格式: BTCUSDT-1m-2020-01.zip
                 let symbol = format!("{}USDT", code);
                 let zip_filename = format!("{}-1m-{}.zip", symbol, year_month_str);
@@ -735,12 +745,19 @@ pub mod history {
                     break;
                 }
 
+                let span = tracing::info_span!(
+                    "",
+                    ________topic________ = format_args!("{:04}-{:02}", year, month)
+                );
+                let _guard = span.enter();
+
                 let symbol = format!("{}USDT", code);
                 let zip_path = PathBuf::from(dir)
                     .join("resources")
                     .join(format!("{}-1m-{:04}-{:02}.zip", symbol, year, month));
 
                 if zip_path.exists() {
+                    extract_zip_to_csv(&zip_path).await?;
                     zip_paths.push(zip_path);
                 }
 
@@ -749,10 +766,6 @@ pub mod history {
                     month = 1;
                     year += 1;
                 }
-            }
-
-            for zip_path in &zip_paths {
-                extract_zip_to_csv(zip_path).await?;
             }
 
             process_single_symbol(code, dir, &feather_path).await?;
@@ -899,7 +912,7 @@ pub mod history {
                 .collect::<Vec<_>>()
                 .into(),
         )
-        .with_has_header(false) // 币安 CSV 无列头
+        .with_has_header(true) // 币安 CSV 有列头
         .with_schema(Some(schema))
         .with_null_values(Some(NullValues::AllColumns(vec!["".into(), "None".into()])))
         .finish()?;
