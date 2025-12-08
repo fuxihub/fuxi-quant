@@ -24,9 +24,11 @@
   textarea,
   [contenteditable="true"],
   pre,
-  code {
-    user-select: text;
-    -webkit-user-select: text;
+  code,
+  .selectable,
+  .selectable * {
+    user-select: text !important;
+    -webkit-user-select: text !important;
   }
 
   html {

@@ -19,7 +19,7 @@ async function greet() {
         <template #title>欢迎使用 Fuxi Quant</template>
         <template #subtitle>量化交易回测框架</template>
         <template #content>
-          <p class="mb-4">Fuxi Quant 是一个基于 Rust 开发的量化交易回测框架，支持合约交易（多空双向）。</p>
+          <p class="mb-4 selectable">Fuxi Quant 是一个基于 Rust 开发的量化交易回测框架，支持合约交易（多空双向）。</p>
 
           <div class="flex gap-2 mb-4">
             <InputText
