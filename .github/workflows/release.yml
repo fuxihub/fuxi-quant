@@ -1,0 +1,198 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '版本号'
+        required: true
+        type: string
+      prerelease:
+        description: '预发布版本'
+        type: boolean
+        default: true
+      skip_build:
+        description: '跳过构建'
+        type: boolean
+        default: true
+      release_title:
+        description: '发布标题'
+        required: false
+        type: string
+      release_notes:
+        description: '发布说明'
+        required: false
+        type: string
+
+env:
+  CARGO_TERM_COLOR: always
+  BINARY_NAME: fuxi-quant
+
+jobs:
+  build:
+    name: 构建 ${{ matrix.target }}
+    if: ${{ !inputs.skip_build }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            artifact_name: fuxi-quant
+            asset_name: fuxi-quant-linux-x86_64
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            artifact_name: fuxi-quant.exe
+            asset_name: fuxi-quant-windows-x86_64.exe
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            artifact_name: fuxi-quant
+            asset_name: fuxi-quant-macos-arm64
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Rust 工具链
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: 配置 Rust 缓存
+        uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: 'v1-rust'
+          shared-key: ${{ matrix.target }}
+          save-if: true
+
+      - name: 构建 Release 版本
+        run: cargo build --release --target ${{ matrix.target }} -p fuxi-quant
+
+      - name: 准备制品 (Unix)
+        if: matrix.os != 'windows-latest'
+        run: |
+          cp target/${{ matrix.target }}/release/${{ matrix.artifact_name }} ${{ matrix.asset_name }}
+          chmod +x ${{ matrix.asset_name }}
+
+      - name: 准备制品 (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          Copy-Item "target/${{ matrix.target }}/release/${{ matrix.artifact_name }}" "${{ matrix.asset_name }}"
+
+      - name: 上传构建制品
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset_name }}
+          path: ${{ matrix.asset_name }}
+          retention-days: 7
+
+      - name: 发送构建邮件通知
+        if: always()
+        uses: ./.github/actions/send-email
+        with:
+          status: ${{ job.status }}
+          type: 'release'
+          version: 'v${{ inputs.version }}'
+          mail_username: ${{ secrets.MAIL_USERNAME }}
+          mail_password: ${{ secrets.MAIL_PASSWORD }}
+          mail_to: ${{ secrets.MAIL_TO }}
+
+  release:
+    name: 发布到 GitHub Release
+    needs: build
+    if: ${{ always() && (inputs.skip_build || needs.build.result == 'success') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 下载所有制品
+        if: ${{ !inputs.skip_build }}
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: 整理制品文件
+        if: ${{ !inputs.skip_build }}
+        run: |
+          mkdir -p release
+          find artifacts -type f -exec cp {} release/ \;
+          ls -la release/
+
+      - name: 生成版本变量
+        id: version
+        run: |
+          VERSION="${{ inputs.version }}"
+          # 确保版本号带 v 前缀
+          if [[ ! "$VERSION" =~ ^v ]]; then
+            TAG_NAME="v${VERSION}"
+          else
+            TAG_NAME="${VERSION}"
+          fi
+          echo "tag_name=${TAG_NAME}" >> $GITHUB_OUTPUT
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+
+      - name: 生成变更日志
+        id: changelog
+        run: |
+          # 获取上一个 tag
+          PREVIOUS_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+
+          if [ -z "$PREVIOUS_TAG" ]; then
+            echo "首次发布，无历史变更记录"
+            COMMITS=$(git log --pretty=format:"- %s (%h)" --no-merges -20)
+          else
+            echo "上一个版本: $PREVIOUS_TAG"
+            COMMITS=$(git log ${PREVIOUS_TAG}..HEAD --pretty=format:"- %s (%h)" --no-merges)
+          fi
+
+          # 使用 EOF 写入多行内容
+          {
+            echo 'changelog<<EOF'
+            echo "## ✨ 更新内容"
+            echo ""
+            if [ -n "${{ inputs.release_notes }}" ]; then
+              echo "${{ inputs.release_notes }}"
+            elif [ -n "$COMMITS" ]; then
+              echo "$COMMITS"
+            else
+              echo "🎉 首次发布"
+            fi
+            echo ""
+            echo "---"
+            echo ""
+            if [ -n "$PREVIOUS_TAG" ]; then
+              echo "📋 [查看完整变更记录](https://github.com/${{ github.repository }}/compare/${PREVIOUS_TAG}...${{ steps.version.outputs.tag_name }})"
+            fi
+            echo 'EOF'
+          } >> $GITHUB_OUTPUT
+
+      - name: 创建 Tag 和 Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag_name }}
+          name: ${{ inputs.release_title || steps.version.outputs.tag_name }}
+          body: ${{ steps.changelog.outputs.changelog }}
+          files: ${{ !inputs.skip_build && 'release/*' || '' }}
+          draft: false
+          prerelease: ${{ inputs.prerelease }}
+          generate_release_notes: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 发送发布邮件通知
+        if: always()
+        uses: ./.github/actions/send-email
+        with:
+          status: ${{ job.status }}
+          type: 'release'
+          version: '${{ steps.version.outputs.tag_name }}'
+          mail_username: ${{ secrets.MAIL_USERNAME }}
+          mail_password: ${{ secrets.MAIL_PASSWORD }}
+          mail_to: ${{ secrets.MAIL_TO }}

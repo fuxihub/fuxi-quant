@@ -1,0 +1,19 @@
+[package]
+name = "fuxi-quant-runtime"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license-file.workspace = true
+readme.workspace = true
+
+[dependencies]
+fuxi-quant-core = { workspace = true }
+rhai = { workspace = true }
+anyhow = { workspace = true }
+chrono = { workspace = true }
+chrono-tz = { workspace = true }
+rust_decimal = { workspace = true }
+polars = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+serde = { workspace = true }

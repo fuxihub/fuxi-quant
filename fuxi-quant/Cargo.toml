@@ -1,0 +1,18 @@
+[package]
+name = "fuxi-quant"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license-file.workspace = true
+readme.workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+fuxi-quant-core = { workspace = true }
+fuxi-quant-runtime = { workspace = true }
+serde = { workspace = true }
+serde_yml = { workspace = true }
+rhai = { workspace = true }
+rust_decimal = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }

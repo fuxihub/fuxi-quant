@@ -1,0 +1,65 @@
+[workspace]
+members = ["fuxi-quant", "fuxi-quant-core", "fuxi-quant-runtime"]
+resolver = "2"
+
+[workspace.package]
+version = "1.0.0"
+edition = "2024"
+authors = ["Husky <husky.robot.dog@gmail.com>"]
+license-file = "LICENSE"
+readme = "README.md"
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+opt-level = 3
+panic = "abort"
+overflow-checks = false
+strip = "symbols"
+
+[workspace.dependencies]
+fuxi-quant-core = { path = "./fuxi-quant-core" }
+fuxi-quant-runtime = { path = "./fuxi-quant-runtime" }
+anyhow = { version = "1.0" }
+tokio = { version = "1.47", features = ["full"] }
+chrono = { version = "0.4", features = ["serde"] }
+chrono-tz = { version = "0.10", features = ["serde"] }
+reqwest = { version = "0.12", default-features = false, features = [
+    "blocking",
+    "rustls-tls",
+    "rustls-tls-native-roots",
+    "stream",
+    "json",
+] }
+polars = { version = "0.52", default-features = false, features = ["full"] }
+zip = { version = "6.0" }
+tracing = { version = "0.1" }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "time"] }
+tracing-appender = { version = "0.2" }
+rand = { version = "0.9", features = ["std", "std_rng"] }
+rand_distr = { version = "0.5" }
+crossterm = { version = "0.29" }
+rayon = { version = "1.11" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = { version = "1.0", features = ["raw_value"] }
+serde_with = { version = "3.16", features = ["macros"] }
+serde_yml = { version = "0.0.12" }
+hmac = { version = "0.12" }
+sha2 = { version = "0.10" }
+base64 = { version = "0.22" }
+tokio-tungstenite = { version = "0.28", features = ["rustls-tls-native-roots"] }
+futures-util = { version = "0.3" }
+crossbeam = { version = "0.8" }
+snowflaked = { version = "1.0", features = ["sync"] }
+async-trait = { version = "0.1" }
+strum = { version = "0.27", features = ["derive"] }
+rust_decimal = { version = "1.39", features = ["macros", "serde-with-str"] }
+indexmap = { version = "2.12" }
+rhai = { version = "1.23", features = [
+    "decimal",
+    "no_time",
+    "no_closure",
+    "no_custom_syntax",
+    "only_i64",
+] }
+parking_lot = { version = "0.12.5" }

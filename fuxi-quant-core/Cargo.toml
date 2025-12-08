@@ -1,0 +1,21 @@
+[package]
+name = "fuxi-quant-core"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license-file.workspace = true
+readme.workspace = true
+
+[dependencies]
+chrono = { workspace = true }
+chrono-tz = { workspace = true }
+strum = { workspace = true }
+anyhow = { workspace = true }
+rust_decimal = { workspace = true }
+polars = { workspace = true }
+snowflaked = { workspace = true }
+tokio = { workspace = true }
+zip = { workspace = true }
+reqwest = { workspace = true }
+tracing = { workspace = true }
+indexmap = { workspace = true }
