@@ -1,0 +1,32 @@
+/* TailwindCSS v4 + PrimeVue 集成 */
+@import "tailwindcss";
+@import "tailwindcss-primeui";
+
+/* 自定义暗黑模式选择器 */
+@custom-variant dark (&:where(.app-dark, .app-dark *));
+
+/* 全局样式 */
+@layer base {
+  html,
+  body,
+  #app {
+    height: 100%;
+  }
+
+  html {
+    font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+  }
+
+  /* 亮色模式背景 */
+  html {
+    color-scheme: light;
+    background-color: var(--p-surface-50);
+    color: var(--p-text-color);
+  }
+
+  /* 暗色模式背景 */
+  html.app-dark {
+    color-scheme: dark;
+    background-color: var(--p-surface-950);
+  }
+}
