@@ -4,8 +4,8 @@ import Aura from '@primeuix/themes/aura';
 import Ripple from 'primevue/ripple';
 import Tooltip from 'primevue/tooltip';
 import 'primeicons/primeicons.css';
-import './style.css';
-import App from "./App.vue";
+import '@/style.css';
+import App from '@/App.vue';
 
 const app = createApp(App);
 

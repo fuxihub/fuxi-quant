@@ -1,7 +1,7 @@
 <script setup>
 import { ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
-import AppLayout from './layouts/AppLayout.vue'
+import AppLayout from '@/layouts/AppLayout.vue'
 
 const greetMsg = ref('')
 const name = ref('')
