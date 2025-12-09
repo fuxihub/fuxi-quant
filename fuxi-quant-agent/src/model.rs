@@ -1,7 +1,12 @@
 use anyhow::{Result, bail};
+use candle_core::{DType, Device, Tensor};
+use candle_nn::VarBuilder;
+use candle_transformers::generation::LogitsProcessor;
+use candle_transformers::models::qwen3::{Config, ModelForCausalLM};
 use hf_hub::Repo;
 use hf_hub::api::tokio::ApiBuilder;
 use std::path::{Path, PathBuf};
+use tokenizers::Tokenizer;
 
 const MARKER_FILE: &str = ".downloaded";
 
@@ -44,22 +49,43 @@ pub fn get_model_file(model_dir: impl AsRef<Path>, filename: &str) -> Result<Pat
     Ok(path)
 }
 
+pub fn load_qwen3(dir: impl AsRef<Path>) -> Result<(ModelForCausalLM, Tokenizer)> {
+    let dir = dir.as_ref();
+
+    let config: Config = serde_json::from_str(&std::fs::read_to_string(dir.join("config.json"))?)?;
+
+    let tokenizer =
+        Tokenizer::from_file(dir.join("tokenizer.json")).map_err(|e| anyhow::anyhow!(e))?;
+
+    let vb = unsafe {
+        VarBuilder::from_mmaped_safetensors(
+            &[dir.join("model.safetensors")],
+            DType::F32,
+            &Device::Cpu,
+        )?
+    };
+
+    let model = ModelForCausalLM::new(&config, vb)?;
+
+    Ok((model, tokenizer))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{download_model, get_model_file};
+    use super::{download_model, get_model_file, load_qwen3};
     use anyhow::Result;
     use std::path::PathBuf;
 
     #[tokio::test]
-    async fn test_download_and_get() -> Result<()> {
+    async fn test_model() -> Result<()> {
         let mut model_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         model_dir.pop();
         model_dir.push(".cache");
         model_dir.push("agent");
         model_dir.push("models");
-        model_dir.push("tiny-random-bert");
+        model_dir.push("Qwen3-0.6B");
 
-        download_model(&model_dir, "hf-internal-testing/tiny-random-bert").await?;
+        download_model(&model_dir, "Qwen/Qwen3-0.6B").await?;
 
         let config = get_model_file(&model_dir, "config.json")?;
         let weights = get_model_file(&model_dir, "model.safetensors")?;
@@ -69,6 +95,8 @@ mod tests {
 
         assert!(config.exists());
         assert!(weights.exists());
+
+        let qwen3 = load_qwen3(&model_dir)?;
 
         Ok(())
     }
