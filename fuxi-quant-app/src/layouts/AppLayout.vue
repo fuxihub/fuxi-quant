@@ -86,26 +86,7 @@ function toggleUserMenu(event) {
       class="flex-shrink-0 flex items-center justify-between px-4 py-2 border-b border-surface-200 dark:border-surface-700 bg-surface-0 dark:bg-surface-900">
       <!-- 左侧 Logo -->
       <div class="flex items-center gap-2">
-        <svg
-          width="28"
-          height="32"
-          viewBox="0 0 35 40"
-          fill="none"
-          xmlns="http://www.w3.org/2000/svg">
-          <path
-            d="M17.5 0L35 10V30L17.5 40L0 30V10L17.5 0Z"
-            fill="var(--p-primary-color)" />
-          <text
-            x="17.5"
-            y="26"
-            text-anchor="middle"
-            fill="white"
-            font-size="18"
-            font-weight="bold">
-            F
-          </text>
-        </svg>
-        <span class="font-bold text-lg">Fuxi Quant</span>
+        <!-- <span class="font-bold text-lg">伏羲量化</span> -->
       </div>
 
       <!-- 中间菜单 -->
