@@ -66,7 +66,7 @@ impl Qwen3Chat {
     pub fn load(dir: impl AsRef<Path>) -> Result<Self> {
         let dir = dir.as_ref();
         let device = get_device()?;
-        let dtype = DType::F32;
+        let dtype = DType::BF16;
 
         println!("Using device: {:?}", device);
 
@@ -202,7 +202,7 @@ mod tests {
         let mut chat = Qwen3Chat::load(&model_dir)?;
 
         println!("\n--- Test: Simple chat ---");
-        let response = chat.chat("你好", 20)?;
+        let response = chat.chat("你好", 1000)?;
         println!("Response: {}", response);
         assert!(!response.is_empty());
 
