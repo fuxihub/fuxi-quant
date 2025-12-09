@@ -1,36 +1,18 @@
 <script setup>
 import { ref, onMounted } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
+
+const router = useRouter()
+const route = useRoute()
 
 // 菜单项
 const menuItems = ref([
-  {
-    label: '首页',
-    icon: 'pi pi-home',
-  },
-  {
-    label: '策略',
-    icon: 'pi pi-code',
-    items: [
-      { label: '策略列表', icon: 'pi pi-list' },
-      { label: '新建策略', icon: 'pi pi-plus' },
-    ],
-  },
-  {
-    label: '回测',
-    icon: 'pi pi-chart-line',
-    items: [
-      { label: '回测记录', icon: 'pi pi-history' },
-      { label: '开始回测', icon: 'pi pi-play' },
-    ],
-  },
-  {
-    label: '数据',
-    icon: 'pi pi-database',
-    items: [
-      { label: '行情数据', icon: 'pi pi-chart-bar' },
-      { label: '因子库', icon: 'pi pi-box' },
-    ],
-  },
+  { label: '智能体', icon: 'pi pi-microchip-ai', route: '/agent' },
+  { label: '策略', icon: 'pi pi-code', route: '/strategy' },
+  { label: '回测', icon: 'pi pi-chart-line', route: '/backtest' },
+  { label: '数据', icon: 'pi pi-database', route: '/data' },
+  { label: '实盘', icon: 'pi pi-bolt', route: '/live' },
+  { label: '系统设置', icon: 'pi pi-cog', route: '/settings' },
 ])
 
 // 用户菜单项
@@ -64,12 +46,12 @@ function applyTheme() {
   }
 }
 
-// 子菜单
-const subMenu = ref()
-const currentSubMenuItems = ref([])
-function toggleMenu(event, item) {
-  currentSubMenuItems.value = item.items || []
-  subMenu.value.toggle(event)
+function navigateTo(path) {
+  router.push(path)
+}
+
+function isActive(path) {
+  return route.path === path
 }
 
 // 用户菜单
@@ -86,53 +68,20 @@ function toggleUserMenu(event) {
       class="flex-shrink-0 flex items-center justify-between px-4 py-2 border-b border-surface-200 dark:border-surface-700 bg-surface-0 dark:bg-surface-900">
       <!-- 左侧 Logo -->
       <div class="flex items-center gap-2">
-        <svg
-          width="28"
-          height="32"
-          viewBox="0 0 35 40"
-          fill="none"
-          xmlns="http://www.w3.org/2000/svg">
-          <path
-            d="M17.5 0L35 10V30L17.5 40L0 30V10L17.5 0Z"
-            fill="var(--p-primary-color)" />
-          <text
-            x="17.5"
-            y="26"
-            text-anchor="middle"
-            fill="white"
-            font-size="18"
-            font-weight="bold">
-            F
-          </text>
-        </svg>
-        <span class="font-bold text-lg">Fuxi Quant</span>
+        <!-- <span class="font-bold text-lg">伏羲量化</span> -->
       </div>
 
       <!-- 中间菜单 -->
       <nav class="flex items-center gap-1">
-        <template
+        <Button
           v-for="item in menuItems"
-          :key="item.label">
-          <Button
-            v-if="!item.items"
-            :label="item.label"
-            :icon="item.icon"
-            text
-            plain
-            class="!font-normal" />
-          <Button
-            v-else
-            :label="item.label"
-            :icon="item.icon"
-            text
-            plain
-            class="!font-normal"
-            @click="(e) => toggleMenu(e, item)" />
-        </template>
-        <Menu
-          ref="subMenu"
-          :model="currentSubMenuItems"
-          :popup="true" />
+          :key="item.label"
+          :label="item.label"
+          :icon="item.icon"
+          text
+          :plain="!isActive(item.route)"
+          :class="{ '!font-normal': !isActive(item.route), '!font-semibold': isActive(item.route) }"
+          @click="navigateTo(item.route)" />
       </nav>
 
       <!-- 右侧：主题切换 + 用户头像 -->

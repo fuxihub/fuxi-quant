@@ -1,0 +1,20 @@
+<svg width="512" height="512" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg" shape-rendering="geometricPrecision">
+  <!-- White Magatama (Yang) -->
+  <path d="M 100 198 A 98 98 0 0 1 100 2 A 49 49 0 0 1 100 100 A 49 49 0 0 0 100 198 Z" fill="white" stroke="none"/>
+
+  <!-- Black Magatama (Yin) -->
+  <!-- 
+    Path construction:
+    1. Start at top (100, 2)
+    2. Large Arc (Right side) to bottom (100, 198)
+    3. Small Arc (Bottom lobe) to center (100, 100) - Bulges Left (Sweep 1)
+    4. Small Arc (Top lobe) to top (100, 2) - Bulges Right (Sweep 0) to cut into the black side
+  -->
+  <path d="M 100 2 A 98 98 0 0 1 100 198 A 49 49 0 0 1 100 100 A 49 49 0 0 0 100 2 Z" fill="black" stroke="none"/>
+  
+  <!-- Top Dot (Black dot in White area) -->
+  <circle cx="100" cy="51" r="14" fill="black"/>
+  
+  <!-- Bottom Dot (White dot in Black area) -->
+  <circle cx="100" cy="149" r="14" fill="white"/>
+</svg>
