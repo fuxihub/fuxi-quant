@@ -202,7 +202,10 @@ mod tests {
         let mut chat = Qwen3Chat::load(&model_dir)?;
 
         println!("\n--- Test: Simple chat ---");
-        let response = chat.chat("你好", 1000)?;
+        let response = chat.chat(
+            "你好,我是你爹. 你管我叫祖宗, 元婴之下皆马喽. 正义审议爆你头, 措手不及徒手拼多多.",
+            1000,
+        )?;
         println!("Response: {}", response);
         assert!(!response.is_empty());
 
