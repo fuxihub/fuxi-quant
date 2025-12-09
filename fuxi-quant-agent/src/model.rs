@@ -50,15 +50,9 @@ pub fn get_model_file(model_dir: impl AsRef<Path>, filename: &str) -> Result<Pat
     Ok(path)
 }
 
-/// 获取设备
-/// 注意: Metal 目前不支持 rms-norm，暂时使用 CPU
+/// 获取设备 (优先使用 Metal)
 fn get_device() -> Result<Device> {
-    // TODO: Metal 支持 rms-norm 后启用
-    // #[cfg(feature = "metal")]
-    // {
-    //     Ok(Device::new_metal(0)?)
-    // }
-    Ok(Device::Cpu)
+    Ok(Device::new_metal(0)?)
 }
 
 pub struct Qwen3Chat {
