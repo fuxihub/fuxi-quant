@@ -13,8 +13,11 @@
     "windows": [
       {
         "title": "fuxi-quant-app",
-        "width": 800,
-        "height": 600
+        "width": 1024,
+        "height": 680,
+        "minWidth": 1024,
+        "minHeight": 680,
+        "center": true
       }
     ],
     "security": {
