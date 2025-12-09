@@ -43,6 +43,7 @@ jobs:
       - name: Rust cache
         uses: swatinem/rust-cache@v2
         with:
+          prefix-key: release
           workspaces: fuxi-quant-app/src-tauri -> target
 
       - name: Install frontend dependencies
