@@ -42,9 +42,10 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           prefix-key: ci
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: 缓存数据
-        uses: actions/cache@v4
+      - name: 恢复数据缓存
+        uses: actions/cache/restore@v4
         with:
           path: .cache
           key: cache-data
@@ -56,6 +57,13 @@ jobs:
         run: cargo test --all-targets --all-features
         env:
           RUSTFLAGS: '-D warnings'
+
+      - name: 保存数据缓存
+        if: github.ref == 'refs/heads/main'
+        uses: actions/cache/save@v4
+        with:
+          path: .cache
+          key: cache-data
 
       - name: 发送邮件通知
         if: always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
