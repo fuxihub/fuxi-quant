@@ -49,6 +49,47 @@ jobs:
         working-directory: fuxi-quant-app
         run: pnpm install
 
+      - name: 生成更新日志
+        id: changelog
+        shell: bash
+        run: |
+          # 获取上一个 tag
+          git fetch --tags --force
+          PREVIOUS_TAG=$(git tag --sort=-creatordate | head -n 1)
+
+          if [ -z "$PREVIOUS_TAG" ]; then
+            COMMITS=$(git log --pretty=format:"- %s（%h）" --no-merges -20)
+          else
+            COMMITS=$(git log ${PREVIOUS_TAG}..HEAD --pretty=format:"- %s（%h）" --no-merges)
+          fi
+
+          # 写入多行内容
+          {
+            echo 'body<<EOF'
+            echo "## ✨ 更新内容"
+            echo ""
+            if [ -n "$COMMITS" ]; then
+              echo "$COMMITS"
+            else
+              echo "🎉 首次发布"
+            fi
+            echo ""
+            echo "---"
+            echo ""
+            echo "## 📥 下载安装"
+            echo ""
+            echo "| 平台 | 文件 |"
+            echo "|------|------|"
+            echo "| macOS (Apple Silicon) | \`伏羲量化_*_aarch64.dmg\` |"
+            echo "| macOS (Intel) | \`伏羲量化_*_x64.dmg\` |"
+            echo "| Windows | \`伏羲量化_*_x64-setup.exe\` |"
+            echo ""
+            if [ -n "$PREVIOUS_TAG" ]; then
+              echo "📋 [查看完整变更记录](https://github.com/${{ github.repository }}/compare/${PREVIOUS_TAG}...v__VERSION__)"
+            fi
+            echo 'EOF'
+          } >> $GITHUB_OUTPUT
+
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -56,17 +97,7 @@ jobs:
           projectPath: fuxi-quant-app
           tagName: v__VERSION__
           releaseName: 伏羲量化 v__VERSION__
-          releaseBody: |
-            ## 📥 下载安装
-
-            | 平台 | 文件 |
-            |------|------|
-            | macOS (Apple Silicon) | `伏羲量化_*_aarch64.dmg` |
-            | macOS (Intel) | `伏羲量化_*_x64.dmg` |
-            | Windows | `伏羲量化_*_x64-setup.exe` |
-
-            ---
-            📋 [查看完整变更记录](https://github.com/${{ github.repository }}/commits/main)
+          releaseBody: ${{ steps.changelog.outputs.body }}
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
