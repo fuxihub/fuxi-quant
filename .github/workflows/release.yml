@@ -3,7 +3,7 @@ name: Release
 on:
   workflow_dispatch:
     branches:
-      - release
+      - main
     inputs:
       version:
         description: '版本号'
