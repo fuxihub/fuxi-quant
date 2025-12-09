@@ -12,19 +12,7 @@ on:
       prerelease:
         description: '预发布版本'
         type: boolean
-        default: true
-      skip_build:
-        description: '跳过构建'
-        type: boolean
-        default: true
-      release_title:
-        description: '发布标题'
-        required: false
-        type: string
-      release_notes:
-        description: '发布说明'
-        required: false
-        type: string
+        default: false
 
 env:
   CARGO_TERM_COLOR: always
@@ -33,7 +21,6 @@ env:
 jobs:
   build:
     name: 构建 ${{ matrix.target }}
-    if: ${{ !inputs.skip_build }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: true
@@ -92,7 +79,6 @@ jobs:
   release:
     name: 发布到 GitHub Release
     needs: build
-    if: ${{ always() && (inputs.skip_build || needs.build.result == 'success') }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -107,13 +93,11 @@ jobs:
         run: git fetch --tags --force
 
       - name: 下载所有制品
-        if: ${{ !inputs.skip_build }}
         uses: actions/download-artifact@v4
         with:
           path: artifacts
 
       - name: 整理制品文件
-        if: ${{ !inputs.skip_build }}
         run: |
           mkdir -p release
           find artifacts -type f -exec cp {} release/ \;
@@ -145,9 +129,7 @@ jobs:
             echo 'changelog<<EOF'
             echo "## ✨ 更新内容"
             echo ""
-            if [ -n "${{ inputs.release_notes }}" ]; then
-              echo "${{ inputs.release_notes }}"
-            elif [ -n "$COMMITS" ]; then
+            if [ -n "$COMMITS" ]; then
               echo "$COMMITS"
             else
               echo "🎉 首次发布"
@@ -165,9 +147,9 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.tag_name }}
-          name: ${{ inputs.release_title || steps.version.outputs.tag_name }}
+          name: ${{ steps.version.outputs.tag_name }}
           body: ${{ steps.changelog.outputs.changelog }}
-          files: ${{ !inputs.skip_build && 'release/*' || '' }}
+          files: release/*
           draft: false
           prerelease: ${{ inputs.prerelease }}
           generate_release_notes: false
