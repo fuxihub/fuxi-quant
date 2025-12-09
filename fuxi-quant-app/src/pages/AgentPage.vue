@@ -12,6 +12,12 @@ const isAtBottom = ref(true)
 const sendMessage = async () => {
   if (!inputContent.value.trim() || isTyping.value) return
 
+  // 1. 性能优化：在开始新一轮对话前，清理历史消息的 chunks，释放 DOM 压力
+  // 历史消息将回退到 v-html 渲染，不再持有大量 span 节点
+  messages.value.forEach((msg) => {
+    if (msg.chunks) msg.chunks = null
+  })
+
   // 添加用户消息
   messages.value.push({
     role: 'user',
@@ -21,6 +27,14 @@ const sendMessage = async () => {
   const userQuery = inputContent.value
   inputContent.value = ''
 
+  // 添加空的 AI 消息
+  const aiMsg = {
+    role: 'assistant',
+    content: '',
+    chunks: [],
+  }
+  messages.value.push(aiMsg)
+
   // 发送消息时，强制滚动到底部，并标记为在底部
   isAtBottom.value = true
   await scrollToBottom()
@@ -29,14 +43,6 @@ const sendMessage = async () => {
   isTyping.value = true
   isReceiving.value = true
   const responseText = `收到你的消息: "${userQuery}"。\n目前我还在开发中，暂时无法处理复杂的量化指令。但为了演示快速渲染效果，这里有一段较长的文本：\n\n量化交易是指以先进的数学模型替代人为的主观判断，利用计算机技术从庞大的历史数据中海选能带来超额收益的多种“大概率”事件以制定策略，极大地减少了投资者情绪波动的影响，避免在市场极度狂热或悲观的情况下作出非理性的投资决策。`
-
-  // 添加空的 AI 消息
-  const aiMsg = {
-    role: 'assistant',
-    content: '',
-    chunks: [],
-  }
-  messages.value.push(aiMsg)
 
   // 启动渲染循环
   requestAnimationFrame(renderLoop)
@@ -67,16 +73,22 @@ const renderLoop = async () => {
 
     const currentMsg = messages.value[messages.value.length - 1]
     const baseIndex = currentMsg.chunks.length
+    const newChunks = []
 
     // 使用 index 遍历，以便生成稳定的 key
     for (let i = 0; i < chunk.length; i++) {
       const char = chunk[i]
-      currentMsg.chunks.push({
+      newChunks.push({
         type: char === '\n' ? 'br' : 'text',
         value: char,
         key: `${baseIndex + i}`,
       })
       currentMsg.content += char
+    }
+
+    // 批量更新 chunks，减少响应式触发频率
+    if (newChunks.length > 0) {
+      currentMsg.chunks.push(...newChunks)
     }
 
     if (isAtBottom.value) {
