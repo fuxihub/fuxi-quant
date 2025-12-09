@@ -163,7 +163,7 @@ const profile = ref({
         :key="item.id">
         <button
           @click="activeTab = item.id"
-          class="w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all text-left font-medium duration-200"
+          class="w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all text-left font-medium duration-200 cursor-pointer"
           :class="
             activeTab === item.id
               ? 'bg-primary text-primary-contrast shadow-lg shadow-primary/30 translate-x-1'
@@ -260,7 +260,7 @@ const profile = ref({
             <!-- 添加新智能体按钮 -->
             <button
               @click="showAddAgentDialog = true"
-              class="w-full py-4 border-2 border-dashed border-surface-200 dark:border-surface-700 rounded-xl text-surface-500 hover:text-primary hover:border-primary/50 hover:bg-surface-50 dark:hover:bg-surface-800/50 transition-all flex items-center justify-center gap-2 group">
+              class="w-full py-4 border-2 border-dashed border-surface-200 dark:border-surface-700 rounded-xl text-surface-500 hover:text-primary hover:border-primary/50 hover:bg-surface-50 dark:hover:bg-surface-800/50 transition-all flex items-center justify-center gap-2 group cursor-pointer">
               <div
                 class="w-8 h-8 rounded-full bg-surface-100 dark:bg-surface-800 flex items-center justify-center group-hover:bg-primary/10 group-hover:text-primary transition-colors">
                 <i class="pi pi-plus"></i>
