@@ -1,7 +1,7 @@
-<svg width="512" height="512" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
-  <!-- Background Circle: White fill, Black border -->
-  <circle cx="100" cy="100" r="98" fill="white" stroke="none"/>
-  
+<svg width="512" height="512" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg" shape-rendering="geometricPrecision">
+  <!-- White Magatama (Yang) -->
+  <path d="M 100 198 A 98 98 0 0 1 100 2 A 49 49 0 0 1 100 100 A 49 49 0 0 0 100 198 Z" fill="white" stroke="none"/>
+
   <!-- Black Magatama (Yin) -->
   <!-- 
     Path construction:
