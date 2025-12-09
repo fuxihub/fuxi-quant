@@ -1,0 +1,11 @@
+[package]
+name = "fuxi-quant-agent"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license-file.workspace = true
+readme.workspace = true
+
+[dependencies]
+hf-hub = { workspace = true }
+anyhow = { workspace = true }
