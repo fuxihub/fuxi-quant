@@ -12,7 +12,7 @@ on:
       prerelease:
         description: '预发布版本'
         type: boolean
-        default: false
+        default: true
 
 env:
   CARGO_TERM_COLOR: always
