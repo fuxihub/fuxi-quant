@@ -73,18 +73,8 @@ jobs:
             else
               echo "🎉 首次发布"
             fi
-            echo ""
-            echo "---"
-            echo ""
-            echo "## 📥 下载安装"
-            echo ""
-            echo "| 平台 | 文件 |"
-            echo "|------|------|"
-            echo "| macOS (Apple Silicon) | \`伏羲量化_*_aarch64.dmg\` |"
-            echo "| macOS (Intel) | \`伏羲量化_*_x64.dmg\` |"
-            echo "| Windows | \`伏羲量化_*_x64-setup.exe\` |"
-            echo ""
             if [ -n "$PREVIOUS_TAG" ]; then
+              echo ""
               echo "📋 [查看完整变更记录](https://github.com/${{ github.repository }}/compare/${PREVIOUS_TAG}...v__VERSION__)"
             fi
             echo 'EOF'
