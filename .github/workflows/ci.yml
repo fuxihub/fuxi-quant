@@ -18,6 +18,20 @@ jobs:
       - name: 检出代码
         uses: actions/checkout@v4
 
+      - name: 安装 Tauri v2 系统依赖 (Linux)
+        run: |
+          sudo apt update
+          sudo apt install -y \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev
+
       - name: 安装 Rust 工具链
         uses: dtolnay/rust-toolchain@stable
         with:
