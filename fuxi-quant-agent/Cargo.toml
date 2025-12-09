@@ -6,6 +6,10 @@ authors.workspace = true
 license-file.workspace = true
 readme.workspace = true
 
+[features]
+default = ["metal"]
+metal = ["candle-core/metal"]
+
 [dependencies]
 hf-hub = { workspace = true }
 anyhow = { workspace = true }
