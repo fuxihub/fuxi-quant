@@ -2,167 +2,94 @@ name: Release
 
 on:
   workflow_dispatch:
-    branches:
-      - main
-    inputs:
-      version:
-        description: '版本号'
-        required: true
-        type: string
-      prerelease:
-        description: '预发布版本'
-        type: boolean
-        default: false
-
-env:
-  CARGO_TERM_COLOR: always
-  BINARY_NAME: fuxi-quant
 
 jobs:
-  build:
-    name: 构建 ${{ matrix.target }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: true
-      matrix:
-        include:
-          - target: x86_64-unknown-linux-gnu
-            os: ubuntu-latest
-            artifact_name: fuxi-quant
-            asset_name: fuxi-quant-linux-x86_64
-          - target: x86_64-pc-windows-msvc
-            os: windows-latest
-            artifact_name: fuxi-quant.exe
-            asset_name: fuxi-quant-windows-x86_64.exe
-          - target: aarch64-apple-darwin
-            os: macos-latest
-            artifact_name: fuxi-quant
-            asset_name: fuxi-quant-macos-arm64
-
-    steps:
-      - name: 检出代码
-        uses: actions/checkout@v4
-
-      - name: 安装 Rust 工具链
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
-
-      - name: 配置 Rust 缓存
-        uses: Swatinem/rust-cache@v2
-        with:
-          prefix-key: 'v1-rust'
-          shared-key: ${{ matrix.target }}
-          save-if: true
-
-      - name: 构建 Release 版本
-        run: cargo build --release --target ${{ matrix.target }} -p fuxi-quant
-
-      - name: 准备制品 (Unix)
-        if: matrix.os != 'windows-latest'
-        run: |
-          cp target/${{ matrix.target }}/release/${{ matrix.artifact_name }} ${{ matrix.asset_name }}
-          chmod +x ${{ matrix.asset_name }}
-
-      - name: 准备制品 (Windows)
-        if: matrix.os == 'windows-latest'
-        run: |
-          Copy-Item "target/${{ matrix.target }}/release/${{ matrix.artifact_name }}" "${{ matrix.asset_name }}"
-
-      - name: 上传构建制品
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.asset_name }}
-          path: ${{ matrix.asset_name }}
-          retention-days: 7
-
-  release:
-    name: 发布到 GitHub Release
-    needs: build
-    runs-on: ubuntu-latest
+  publish-tauri:
     permissions:
       contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            args: '--target aarch64-apple-darwin'
+          - platform: macos-latest
+            args: '--target x86_64-apple-darwin'
+          - platform: windows-latest
+            args: ''
+
+    runs-on: ${{ matrix.platform }}
 
     steps:
-      - name: 检出代码
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
         with:
-          fetch-depth: 0
+          version: 9
 
-      - name: 获取所有 Tags
-        run: git fetch --tags --force
-
-      - name: 下载所有制品
-        uses: actions/download-artifact@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
-          path: artifacts
+          node-version: lts/*
+          cache: pnpm
+          cache-dependency-path: fuxi-quant-app/pnpm-lock.yaml
 
-      - name: 整理制品文件
-        run: |
-          mkdir -p release
-          find artifacts -type f -exec cp {} release/ \;
-          ls -la release/
-
-      - name: 生成版本变量
-        id: version
-        run: |
-          VERSION="${{ inputs.version }}"
-          echo "tag_name=${VERSION}" >> $GITHUB_OUTPUT
-          echo "version=${VERSION}" >> $GITHUB_OUTPUT
-
-      - name: 生成变更日志
-        id: changelog
-        run: |
-          # 获取上一个 tag
-          PREVIOUS_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
-
-          if [ -z "$PREVIOUS_TAG" ]; then
-            echo "首次发布，无历史变更记录"
-            COMMITS=$(git log --pretty=format:"- %s (%h)" --no-merges -20)
-          else
-            echo "上一个版本: $PREVIOUS_TAG"
-            COMMITS=$(git log ${PREVIOUS_TAG}..HEAD --pretty=format:"- %s (%h)" --no-merges)
-          fi
-
-          # 使用 EOF 写入多行内容
-          {
-            echo 'changelog<<EOF'
-            echo "## ✨ 更新内容"
-            echo ""
-            if [ -n "$COMMITS" ]; then
-              echo "$COMMITS"
-            else
-              echo "🎉 首次发布"
-            fi
-            echo ""
-            echo "---"
-            echo ""
-            if [ -n "$PREVIOUS_TAG" ]; then
-              echo "📋 [查看完整变更记录](https://github.com/${{ github.repository }}/compare/${PREVIOUS_TAG}...${{ steps.version.outputs.tag_name }})"
-            fi
-            echo 'EOF'
-          } >> $GITHUB_OUTPUT
-
-      - name: 创建 Tag 和 Release
-        uses: softprops/action-gh-release@v2
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
         with:
-          tag_name: ${{ steps.version.outputs.tag_name }}
-          name: ${{ steps.version.outputs.tag_name }}
-          body: ${{ steps.changelog.outputs.changelog }}
-          files: release/*
-          draft: false
-          prerelease: ${{ inputs.prerelease }}
-          generate_release_notes: false
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          prefix-key: release
+
+      - name: Install frontend dependencies
+        working-directory: fuxi-quant-app
+        run: pnpm install
+
+      - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: fuxi-quant-app
+          tagName: v__VERSION__
+          releaseName: 伏羲量化 v__VERSION__
+          releaseBody: |
+            ## 📥 下载安装
+
+            | 平台 | 文件 |
+            |------|------|
+            | macOS (Apple Silicon) | `伏羲量化_*_aarch64.dmg` |
+            | macOS (Intel) | `伏羲量化_*_x64.dmg` |
+            | Windows | `伏羲量化_*_x64-setup.exe` 或 `.msi` |
+
+            ---
+            📋 [查看完整变更记录](https://github.com/${{ github.repository }}/commits/main)
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.args }}
+
+  notify:
+    name: 发送通知
+    needs: publish-tauri
+    runs-on: ubuntu-latest
+    if: always()
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 读取版本号
+        id: version
+        run: echo "version=$(jq -r .version fuxi-quant-app/src-tauri/tauri.conf.json)" >> $GITHUB_OUTPUT
 
       - name: 发送发布邮件通知
-        if: always()
         uses: ./.github/actions/send-email
         with:
-          status: ${{ job.status }}
+          status: ${{ needs.publish-tauri.result }}
           type: 'release'
-          version: '${{ steps.version.outputs.tag_name }}'
+          version: 'v${{ steps.version.outputs.version }}'
           mail_username: ${{ secrets.MAIL_USERNAME }}
           mail_password: ${{ secrets.MAIL_PASSWORD }}
           mail_to: ${{ secrets.MAIL_TO }}

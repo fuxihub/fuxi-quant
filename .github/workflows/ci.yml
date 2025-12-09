@@ -40,6 +40,8 @@ jobs:
 
       - name: 配置 Rust 缓存
         uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: ci
 
       - name: 缓存数据
         uses: actions/cache@v4
