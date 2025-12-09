@@ -1,7 +1,6 @@
 [package]
 name = "fuxi-quant-app"
-version = "1.0.0"
-description = "伏羲量化应用"
+version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license-file.workspace = true
