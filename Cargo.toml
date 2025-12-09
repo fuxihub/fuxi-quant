@@ -1,5 +1,10 @@
 [workspace]
-members = ["fuxi-quant", "fuxi-quant-core", "fuxi-quant-runtime"]
+members = [
+    "fuxi-quant",
+    "fuxi-quant-core",
+    "fuxi-quant-runtime",
+    "fuxi-quant-app/src-tauri",
+]
 resolver = "2"
 
 [workspace.package]
@@ -63,3 +68,6 @@ rhai = { version = "1.23", features = [
     "only_i64",
 ] }
 parking_lot = { version = "0.12.5" }
+tauri-build = { version = "2", features = [] }
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = { version = "2" }
