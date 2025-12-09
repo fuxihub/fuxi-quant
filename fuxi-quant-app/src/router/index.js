@@ -30,6 +30,11 @@ const routes = [
         name: 'Live',
         component: () => import('@/pages/LivePage.vue'),
     },
+    {
+        path: '/settings',
+        name: 'Settings',
+        component: () => import('@/pages/SettingsPage.vue'),
+    },
 ]
 
 const router = createRouter({

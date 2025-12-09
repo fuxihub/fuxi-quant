@@ -12,6 +12,7 @@ const menuItems = ref([
   { label: '回测', icon: 'pi pi-chart-line', route: '/backtest' },
   { label: '数据', icon: 'pi pi-database', route: '/data' },
   { label: '实盘', icon: 'pi pi-bolt', route: '/live' },
+  { label: '系统设置', icon: 'pi pi-cog', route: '/settings' },
 ])
 
 // 用户菜单项
