@@ -63,7 +63,7 @@ jobs:
             |------|------|
             | macOS (Apple Silicon) | `伏羲量化_*_aarch64.dmg` |
             | macOS (Intel) | `伏羲量化_*_x64.dmg` |
-            | Windows | `伏羲量化_*_x64-setup.exe` 或 `.msi` |
+            | Windows | `伏羲量化_*_x64-setup.exe` |
 
             ---
             📋 [查看完整变更记录](https://github.com/${{ github.repository }}/commits/main)
