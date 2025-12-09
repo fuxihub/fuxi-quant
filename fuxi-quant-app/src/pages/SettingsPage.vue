@@ -1,9 +1,11 @@
 <script setup>
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 
 const activeTab = ref('agents')
 const menu = ref()
 const selectedAgent = ref(null)
+const showAddAgentDialog = ref(false)
+const selectedAgentsToDownload = ref([])
 
 const menuItems = [
   { id: 'agents', label: '智能体管理', icon: 'pi pi-box' },
@@ -11,19 +13,48 @@ const menuItems = [
   { id: 'profile', label: '个人偏好', icon: 'pi pi-user' },
 ]
 
-const agentMenuItems = [
-  {
-    label: '设为默认',
-    icon: 'pi pi-star',
-    command: () => setAsDefault(selectedAgent.value),
-  },
-  {
-    label: '删除',
-    icon: 'pi pi-trash',
-    class: 'text-red-500',
-    command: () => deleteAgent(selectedAgent.value),
-  },
+const availableAgents = [
+  { id: 101, name: 'Llama-3-70B-Quant', version: 'v2.0', size: '12GB', date: '2025-12-10' },
+  { id: 102, name: 'Mistral-Large-Instruct', version: 'v1.1', size: '8.5GB', date: '2025-12-09' },
+  { id: 103, name: 'Gemma-7B-Finetuned', version: 'v1.0', size: '4.2GB', date: '2025-12-08' },
 ]
+
+const agentMenuItems = computed(() => {
+  const isDefault = selectedAgent.value?.isDefault
+  const isDownloading = selectedAgent.value?.status === 'downloading'
+
+  if (isDownloading) {
+    return [
+      {
+        label: '停止下载',
+        icon: 'pi pi-pause',
+        command: () => stopDownload(selectedAgent.value),
+      },
+      {
+        label: '删除',
+        icon: 'pi pi-trash',
+        class: 'text-red-500',
+        command: () => deleteAgent(selectedAgent.value),
+      },
+    ]
+  }
+
+  return [
+    {
+      label: '设为默认',
+      icon: 'pi pi-star',
+      disabled: isDefault,
+      command: () => setAsDefault(selectedAgent.value),
+    },
+    {
+      label: '删除',
+      icon: 'pi pi-trash',
+      class: 'text-red-500',
+      disabled: isDefault,
+      command: () => deleteAgent(selectedAgent.value),
+    },
+  ]
+})
 
 // 模拟数据
 const agents = ref([
@@ -70,6 +101,46 @@ const setAsDefault = (agent) => {
 const deleteAgent = (agent) => {
   if (!agent) return
   agents.value = agents.value.filter((a) => a.id !== agent.id)
+}
+
+const stopDownload = (agent) => {
+  deleteAgent(agent)
+}
+
+const startDownload = () => {
+  showAddAgentDialog.value = false
+  selectedAgentsToDownload.value.forEach((agent) => {
+    // 检查是否已存在
+    if (agents.value.find((a) => a.name === agent.name)) return
+
+    const newAgent = {
+      ...agent,
+      status: 'downloading',
+      isDefault: false,
+      progress: 0,
+    }
+    agents.value.push(newAgent)
+    simulateDownload(newAgent)
+  })
+  selectedAgentsToDownload.value = []
+}
+
+const simulateDownload = (agent) => {
+  const interval = setInterval(() => {
+    // 如果代理被删除了，清除定时器
+    if (!agents.value.find((a) => a.id === agent.id)) {
+      clearInterval(interval)
+      return
+    }
+
+    if (agent.progress < 100) {
+      agent.progress += Math.floor(Math.random() * 5) + 2
+      if (agent.progress > 100) agent.progress = 100
+    } else {
+      agent.status = 'ready'
+      clearInterval(interval)
+    }
+  }, 200)
 }
 
 const exchanges = ref([
@@ -150,8 +221,23 @@ const profile = ref({
                       class="px-2 py-0.5 rounded text-xs bg-primary text-primary-contrast font-medium">
                       默认
                     </span>
+                    <span
+                      v-if="agent.status === 'downloading'"
+                      class="px-2 py-0.5 rounded text-xs bg-surface-200 dark:bg-surface-700 text-surface-600 dark:text-surface-300 font-medium">
+                      下载中
+                    </span>
                   </div>
-                  <div class="flex items-center gap-3 text-sm text-surface-500">
+                  <div
+                    v-if="agent.status === 'downloading'"
+                    class="w-48">
+                    <ProgressBar
+                      :value="agent.progress"
+                      :showValue="true"
+                      style="height: 10px"></ProgressBar>
+                  </div>
+                  <div
+                    v-else
+                    class="flex items-center gap-3 text-sm text-surface-500">
                     <span class="bg-surface-100 dark:bg-surface-700 px-2 py-0.5 rounded text-xs">
                       {{ agent.version }}
                     </span>
@@ -161,19 +247,8 @@ const profile = ref({
                 </div>
               </div>
               <div class="flex items-center gap-3">
-                <span
-                  class="px-3 py-1 rounded-full text-xs font-medium flex items-center gap-1.5"
-                  :class="
-                    agent.status === 'active'
-                      ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
-                      : 'bg-surface-100 text-surface-600 dark:bg-surface-700 dark:text-surface-400'
-                  ">
-                  <span
-                    class="w-1.5 h-1.5 rounded-full"
-                    :class="agent.status === 'active' ? 'bg-green-500' : 'bg-surface-500'"></span>
-                  {{ agent.status === 'active' ? '运行中' : '已就绪' }}
-                </span>
                 <Button
+                  v-if="!agent.isDefault || agent.status === 'downloading'"
                   icon="pi pi-ellipsis-v"
                   text
                   rounded
@@ -184,6 +259,7 @@ const profile = ref({
 
             <!-- 添加新智能体按钮 -->
             <button
+              @click="showAddAgentDialog = true"
               class="w-full py-4 border-2 border-dashed border-surface-200 dark:border-surface-700 rounded-xl text-surface-500 hover:text-primary hover:border-primary/50 hover:bg-surface-50 dark:hover:bg-surface-800/50 transition-all flex items-center justify-center gap-2 group">
               <div
                 class="w-8 h-8 rounded-full bg-surface-100 dark:bg-surface-800 flex items-center justify-center group-hover:bg-primary/10 group-hover:text-primary transition-colors">
@@ -303,6 +379,53 @@ const profile = ref({
             </div>
           </div>
         </transition>
+
+        <!-- 添加智能体弹窗 -->
+        <Dialog
+          v-model:visible="showAddAgentDialog"
+          modal
+          header="添加新智能体"
+          :style="{ width: '50rem' }"
+          :breakpoints="{ '1199px': '75vw', '575px': '90vw' }">
+          <div class="flex flex-col gap-4">
+            <p class="text-surface-500 mb-2">选择您想要下载的智能体模型：</p>
+
+            <div class="border border-surface-200 dark:border-surface-700 rounded-xl overflow-hidden">
+              <div
+                v-for="(agent, index) in availableAgents"
+                :key="agent.id"
+                class="flex items-center p-4 hover:bg-surface-50 dark:hover:bg-surface-800 transition-colors"
+                :class="{ 'border-t border-surface-200 dark:border-surface-700': index > 0 }">
+                <div class="mr-4">
+                  <Checkbox
+                    v-model="selectedAgentsToDownload"
+                    :value="agent" />
+                </div>
+                <div class="flex-1">
+                  <div class="font-bold text-surface-900 dark:text-surface-50">{{ agent.name }}</div>
+                  <div class="text-sm text-surface-500 flex gap-3 mt-1">
+                    <span class="bg-surface-100 dark:bg-surface-700 px-2 rounded text-xs">{{ agent.version }}</span>
+                    <span>{{ agent.size }}</span>
+                    <span>{{ agent.date }}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <template #footer>
+            <Button
+              label="取消"
+              text
+              severity="secondary"
+              @click="showAddAgentDialog = false" />
+            <Button
+              label="下载选中项"
+              icon="pi pi-download"
+              @click="startDownload"
+              :disabled="selectedAgentsToDownload.length === 0" />
+          </template>
+        </Dialog>
       </div>
     </div>
   </div>
