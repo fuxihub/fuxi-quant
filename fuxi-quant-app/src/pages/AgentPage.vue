@@ -1,7 +1,7 @@
 <script setup>
 import { ref, nextTick } from 'vue'
 
-const messages = ref([{ role: 'assistant', content: '你好！我是你的量化交易助手。有什么我可以帮你的吗？' }])
+const messages = ref([{ role: 'assistant', content: '你好！我是阿强，您的量化交易助手。有什么我可以帮你的吗？' }])
 const inputContent = ref('')
 const messagesContainer = ref(null)
 const isTyping = ref(false)
@@ -134,10 +134,10 @@ const handleKeydown = (e) => {
       class="flex-none flex items-center justify-between px-4 py-3 border-b border-surface-200 dark:border-surface-700 bg-surface-50 dark:bg-surface-900/50">
       <div class="flex items-center gap-2">
         <i class="pi pi-microchip-ai text-primary text-xl"></i>
-        <span class="font-medium text-lg">AI 助手</span>
+        <span class="font-medium text-lg">阿强</span>
       </div>
       <Button
-        icon="pi pi-trash"
+        icon="pi pi-refresh"
         text
         rounded
         severity="secondary"
