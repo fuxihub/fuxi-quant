@@ -151,7 +151,8 @@ impl Qwen3Llama {
             let next_token = sampler.sample(&ctx, batch.n_tokens() - 1);
             sampler.accept(next_token);
 
-            if self.model.is_eog_token(next_token) {
+            // 只检查真正的 EOS，不检查 <|im_end|> 等其他 EOG token
+            if next_token == self.model.token_eos() {
                 break;
             }
 
@@ -276,6 +277,9 @@ impl<'a> ChatSession<'a> {
         self.ctx.decode(&mut batch)?;
         self.n_past += n_new;
 
+        // 记录 assistant 回复开始位置，用于后续清理 thinking 内容
+        let assistant_start_pos = self.n_past;
+
         // 生成回复
         let mut output = String::new();
         let max_ctx = self
@@ -285,8 +289,8 @@ impl<'a> ChatSession<'a> {
             .map(NonZeroU32::get)
             .unwrap_or(0) as usize;
 
-        // 在循环外创建采样器
-        let params = SamplingParams::default();
+        // 在循环外创建采样器（使用 Thinking 模式参数）
+        let params = SamplingParams::thinking();
         let mut sampler = LlamaSampler::chain_simple([
             LlamaSampler::top_k(params.top_k),
             LlamaSampler::top_p(params.top_p, 1),
@@ -294,6 +298,9 @@ impl<'a> ChatSession<'a> {
             LlamaSampler::temp(params.temperature),
             LlamaSampler::dist(self.n_past as u32),
         ]);
+
+        // 追踪 </think> 结束位置
+        let mut think_end_pos: Option<usize> = None;
 
         loop {
             if max_ctx > 0 && self.n_past >= max_ctx.saturating_sub(1) {
@@ -303,13 +310,19 @@ impl<'a> ChatSession<'a> {
             let next_token = sampler.sample(&self.ctx, batch.n_tokens() - 1);
             sampler.accept(next_token);
 
-            if self.llama.model.is_eog_token(next_token) {
+            // 只检查真正的 EOS
+            if next_token == self.llama.model.token_eos() {
                 break;
             }
 
             if let Ok(piece) = self.llama.model.token_to_str(next_token, Special::Tokenize) {
                 on_token(&piece);
                 output.push_str(&piece);
+
+                // 检测 </think> 结束位置（包含后面的换行）
+                if think_end_pos.is_none() && output.contains("</think>\n\n") {
+                    think_end_pos = Some(self.n_past + 1); // +1 因为当前 token 还未计入
+                }
             }
 
             batch.clear();
@@ -318,6 +331,42 @@ impl<'a> ChatSession<'a> {
 
             self.ctx.decode(&mut batch)?;
         }
+
+        // 官方最佳实践：多轮对话中，历史记录不应包含 thinking 内容
+        // 从 KV Cache 中删除 thinking 部分，只保留最终输出
+        if let Some(think_end) = think_end_pos {
+            let thinking_len = think_end - assistant_start_pos;
+            if thinking_len > 0 {
+                // 删除 thinking 内容的 KV Cache
+                let _ = self.ctx.clear_kv_cache_seq(
+                    Some(0), // sequence id
+                    Some(assistant_start_pos as u32),
+                    Some(think_end as u32),
+                );
+                // 将后续内容位置前移
+                let _ = self.ctx.kv_cache_seq_add(
+                    0,
+                    Some(think_end as u32),
+                    Some(self.n_past as u32),
+                    -(thinking_len as i32),
+                );
+                self.n_past -= thinking_len;
+            }
+        }
+
+        // 生成结束后，编码 <|im_end|>\n 到 KV Cache，确保下一轮对话正确
+        let end_tokens = self
+            .llama
+            .model
+            .str_to_token("<|im_end|>\n", AddBos::Never)
+            .map_err(|e| anyhow::anyhow!(e))?;
+        batch.clear();
+        for (i, token) in end_tokens.iter().enumerate() {
+            let pos = (self.n_past + i) as i32;
+            batch.add(*token, pos, &[0], i == end_tokens.len() - 1)?;
+        }
+        self.ctx.decode(&mut batch)?;
+        self.n_past += end_tokens.len();
 
         Ok(output)
     }
