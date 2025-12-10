@@ -150,9 +150,9 @@ impl Qwen3Llama {
         for chunk_start in (0..n_prompt).step_by(BATCH_SIZE) {
             batch.clear();
             let chunk_end = (chunk_start + BATCH_SIZE).min(n_prompt);
-            for i in chunk_start..chunk_end {
+            for (i, &token) in tokens.iter().enumerate().take(chunk_end).skip(chunk_start) {
                 let is_last = i == n_prompt - 1;
-                batch.add(tokens[i], i as i32, &[0], is_last)?;
+                batch.add(token, i as i32, &[0], is_last)?;
             }
             ctx.decode(&mut batch)?;
         }
@@ -224,9 +224,9 @@ impl Qwen3Llama {
         for chunk_start in (0..n_prompt).step_by(BATCH_SIZE) {
             batch.clear();
             let chunk_end = (chunk_start + BATCH_SIZE).min(n_prompt);
-            for i in chunk_start..chunk_end {
+            for (i, &token) in tokens.iter().enumerate().take(chunk_end).skip(chunk_start) {
                 let is_last = i == n_prompt - 1;
-                batch.add(tokens[i], i as i32, &[0], is_last)?;
+                batch.add(token, i as i32, &[0], is_last)?;
             }
             ctx.decode(&mut batch)?;
         }
