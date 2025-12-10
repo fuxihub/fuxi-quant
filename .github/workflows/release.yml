@@ -23,9 +23,9 @@ jobs:
         with:
           lfs: true
 
-      - name: Install dependencies (macOS)
+      - name: Set macOS deployment target
         if: matrix.platform == 'macos-latest'
-        run: brew install cmake
+        run: echo "MACOSX_DEPLOYMENT_TARGET=11.0" >> $GITHUB_ENV
 
       - uses: pnpm/action-setup@v4
         with:
