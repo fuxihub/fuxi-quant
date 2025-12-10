@@ -208,7 +208,7 @@ const clearMessages = async () => {
   } catch (e) {
     console.error('重置会话失败:', e)
   }
-  messages.value = [{ role: 'assistant', content: '你好！我是阿强，您的量化交易助手。有什么我可以帮你的吗？' }]
+  messages.value = []
 }
 </script>
 

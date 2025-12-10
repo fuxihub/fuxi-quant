@@ -40,7 +40,7 @@ pub async fn load_model(model_path: String) -> Result<String, String> {
 
         // 初始化会话
         let model = MODEL.get().unwrap();
-        let session = ChatSession::new(model, Some("你是阿强，一个专业的量化交易助手。"))
+        let session = ChatSession::new(model, Some("你是阿强，一个专业的量化交易策略助手。根据用户的交易想法，帮助生成可执行的量化策略代码。你擅长技术分析、因子挖掘和风险控制。回答时直接给出策略逻辑和代码，简洁实用。"))
             .map_err(|e| e.to_string())?;
 
         // Safety: MODEL 是 'static，所以 session 也可以安全地保存
@@ -88,7 +88,7 @@ pub async fn reset_chat() -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(|| {
         let model = MODEL.get().ok_or("模型未加载")?;
 
-        let session = ChatSession::new(model, Some("你是阿强，一个专业的量化交易助手。"))
+        let session = ChatSession::new(model, Some("你是阿强，一个专业的量化交易策略助手。根据用户的交易想法，帮助生成可执行的量化策略代码。你擅长技术分析、因子挖掘和风险控制。回答时直接给出策略逻辑和代码，简洁实用。"))
             .map_err(|e| e.to_string())?;
 
         let wrapper = ChatSessionWrapper {
