@@ -270,9 +270,149 @@ impl Qwen3Llama {
     }
 }
 
+/// 对话消息
+#[derive(Debug, Clone)]
+pub struct Message {
+    pub role: Role,
+    pub content: String,
+}
+
+/// 消息角色
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Role {
+    System,
+    User,
+    Assistant,
+}
+
+/// 支持连续对话的会话
+pub struct ChatSession<'a> {
+    llama: &'a Qwen3Llama,
+    messages: Vec<Message>,
+}
+
+impl<'a> ChatSession<'a> {
+    /// 创建新会话
+    pub fn new(llama: &'a Qwen3Llama) -> Self {
+        Self {
+            llama,
+            messages: Vec::new(),
+        }
+    }
+
+    /// 创建带系统提示的会话
+    pub fn with_system(llama: &'a Qwen3Llama, system: &str) -> Self {
+        Self {
+            llama,
+            messages: vec![Message {
+                role: Role::System,
+                content: system.to_string(),
+            }],
+        }
+    }
+
+    /// 发送消息并获取回复
+    pub fn send(&mut self, user_msg: &str, max_new_tokens: usize) -> Result<String> {
+        self.send_with_params(user_msg, max_new_tokens, SamplingParams::default())
+    }
+
+    /// 发送消息并获取回复（指定采样参数）
+    pub fn send_with_params(
+        &mut self,
+        user_msg: &str,
+        max_new_tokens: usize,
+        params: SamplingParams,
+    ) -> Result<String> {
+        // 添加用户消息
+        self.messages.push(Message {
+            role: Role::User,
+            content: user_msg.to_string(),
+        });
+
+        // 构建完整 prompt
+        let prompt = self.build_prompt();
+        let response = self.llama.generate(&prompt, max_new_tokens, params)?;
+
+        // 保存助手回复
+        self.messages.push(Message {
+            role: Role::Assistant,
+            content: response.clone(),
+        });
+
+        Ok(response)
+    }
+
+    /// 流式发送消息
+    pub fn send_stream<F>(
+        &mut self,
+        user_msg: &str,
+        max_new_tokens: usize,
+        on_token: F,
+    ) -> Result<String>
+    where
+        F: FnMut(&str),
+    {
+        self.messages.push(Message {
+            role: Role::User,
+            content: user_msg.to_string(),
+        });
+
+        let prompt = self.build_prompt();
+        let response = self.llama.generate_stream(
+            &prompt,
+            max_new_tokens,
+            SamplingParams::default(),
+            on_token,
+        )?;
+
+        self.messages.push(Message {
+            role: Role::Assistant,
+            content: response.clone(),
+        });
+
+        Ok(response)
+    }
+
+    /// 获取对话历史
+    pub fn history(&self) -> &[Message] {
+        &self.messages
+    }
+
+    /// 清空对话历史
+    pub fn clear(&mut self) {
+        self.messages.clear();
+    }
+
+    /// 构建完整的 ChatML prompt
+    fn build_prompt(&self) -> String {
+        let mut prompt = String::new();
+        for msg in &self.messages {
+            match msg.role {
+                Role::System => {
+                    prompt.push_str("<|im_start|>system\n");
+                    prompt.push_str(&msg.content);
+                    prompt.push_str("<|im_end|>\n");
+                }
+                Role::User => {
+                    prompt.push_str("<|im_start|>user\n");
+                    prompt.push_str(&msg.content);
+                    prompt.push_str("<|im_end|>\n");
+                }
+                Role::Assistant => {
+                    prompt.push_str("<|im_start|>assistant\n");
+                    prompt.push_str(&msg.content);
+                    prompt.push_str("<|im_end|>\n");
+                }
+            }
+        }
+        prompt.push_str("<|im_start|>assistant\n");
+        prompt
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::Qwen3Llama;
+    use super::{ChatSession, Qwen3Llama};
     use anyhow::Result;
     use std::io::Write;
     use std::path::PathBuf;
@@ -317,6 +457,35 @@ mod tests {
         println!(); // 换行
 
         assert!(!resp.trim().is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn test_multi_turn() -> Result<()> {
+        let llama = Qwen3Llama::load(model_path())?;
+        let mut session = ChatSession::with_system(&llama, "你是一个量化交易助手");
+
+        // 第一轮对话
+        println!("=== 第一轮 ===");
+        let resp1 = session.send_stream("什么是均线策略?", 256, |token| {
+            print!("{}", token);
+            std::io::stdout().flush().ok();
+        })?;
+        println!("\n");
+
+        // 第二轮对话（模型应该记住上下文）
+        println!("=== 第二轮 ===");
+        let resp2 = session.send_stream("给我一个简单的代码示例", 256, |token| {
+            print!("{}", token);
+            std::io::stdout().flush().ok();
+        })?;
+        println!("\n");
+
+        assert!(!resp1.trim().is_empty());
+        assert!(!resp2.trim().is_empty());
+
+        // 查看历史记录
+        println!("对话轮数: {}", session.history().len());
         Ok(())
     }
 }
