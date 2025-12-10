@@ -1,10 +1,14 @@
 <script setup>
-import { ref, computed, nextTick, watch } from 'vue'
+import { ref, computed, nextTick, watch, onMounted } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
+import { invoke, Channel } from '@tauri-apps/api/core'
+import { resolveResource } from '@tauri-apps/api/path'
 
 // ============ 常量配置 ============
 const MAX_MESSAGES = 200 // 最大消息数量限制
 const TYPING_SPEED = { slow: 2, normal: 4, fast: 8 } // 打字速度（字符/帧）
+const MAX_TOKENS = 4096 // 最大生成 token 数
+const MODEL_NAME = 'resources/Qwen3-0.6B-Q8_0.gguf' // 模型资源路径
 
 // ============ 状态 ============
 const messages = ref([{ role: 'assistant', content: '你好！我是阿强，您的量化交易助手。有什么我可以帮你的吗？' }])
@@ -15,6 +19,42 @@ const pendingQueue = ref('')
 const isReceiving = ref(false)
 const isAtBottom = ref(true)
 const shouldFollowBottom = ref(true)
+const isModelLoaded = ref(false)
+const isLoadingModel = ref(false)
+const loadError = ref('')
+
+// ============ 模型加载 ============
+const loadModel = async () => {
+  if (isModelLoaded.value || isLoadingModel.value) return
+
+  isLoadingModel.value = true
+  loadError.value = ''
+
+  try {
+    // 检查模型是否已加载
+    const loaded = await invoke('is_model_loaded')
+    if (loaded) {
+      isModelLoaded.value = true
+      isLoadingModel.value = false
+      return
+    }
+
+    // 解析模型资源路径
+    const modelPath = await resolveResource(MODEL_NAME)
+    await invoke('load_model', { modelPath })
+    isModelLoaded.value = true
+  } catch (e) {
+    loadError.value = `模型加载失败: ${e}`
+    console.error('模型加载失败:', e)
+  } finally {
+    isLoadingModel.value = false
+  }
+}
+
+// 组件挂载时加载模型
+onMounted(() => {
+  loadModel()
+})
 
 // ============ 虚拟滚动配置 ============
 const virtualizerOptions = computed(() => ({
@@ -46,6 +86,18 @@ watch(
 const sendMessage = async () => {
   if (!inputContent.value.trim() || isTyping.value) return
 
+  // 模型未加载时提示
+  if (!isModelLoaded.value) {
+    if (isLoadingModel.value) {
+      return // 正在加载中
+    }
+    // 尝试重新加载
+    await loadModel()
+    if (!isModelLoaded.value) {
+      return
+    }
+  }
+
   // 清理历史消息的打字状态，释放内存
   messages.value.forEach((msg) => {
     if (msg.isTyping) msg.isTyping = false
@@ -76,19 +128,41 @@ const sendMessage = async () => {
   shouldFollowBottom.value = true
   isAtBottom.value = true
 
-  // 模拟 AI 回复
+  // 开始流式对话
   isTyping.value = true
   isReceiving.value = true
-  const responseText = `收到你的消息: "${userQuery}"。\n目前我还在开发中，暂时无法处理复杂的量化指令。但为了演示快速渲染效果，这里有一段较长的文本：\n\n量化交易是指以先进的数学模型替代人为的主观判断，利用计算机技术从庞大的历史数据中海选能带来超额收益的多种"大概率"事件以制定策略，极大地减少了投资者情绪波动的影响，避免在市场极度狂热或悲观的情况下作出非理性的投资决策。`
 
   // 启动渲染循环
   requestAnimationFrame(renderLoop)
 
-  // 模拟网络请求返回数据
-  setTimeout(() => {
-    pendingQueue.value += responseText
+  // 创建 Channel 接收流式响应
+  const channel = new Channel()
+  channel.onmessage = (event) => {
+    if (event.type === 'Token') {
+      // 收到 token，添加到队列
+      pendingQueue.value += event.data
+    } else if (event.type === 'Done') {
+      // 完成
+      isReceiving.value = false
+    } else if (event.type === 'Error') {
+      // 错误处理
+      console.error('对话错误:', event.data)
+      pendingQueue.value += `\n[错误: ${event.data}]`
+      isReceiving.value = false
+    }
+  }
+
+  try {
+    await invoke('chat', {
+      message: userQuery,
+      maxTokens: MAX_TOKENS,
+      channel,
+    })
+  } catch (e) {
+    console.error('调用失败:', e)
+    pendingQueue.value += `\n[错误: ${e}]`
     isReceiving.value = false
-  }, 500)
+  }
 }
 
 // ============ 打字机渲染循环（优化版：按批次渲染） ============
@@ -169,7 +243,15 @@ const handleKeydown = (e) => {
   }
 }
 
-const clearMessages = () => {
+const clearMessages = async () => {
+  // 清空后端会话
+  if (isModelLoaded.value) {
+    try {
+      await invoke('clear_chat')
+    } catch (e) {
+      console.error('清空会话失败:', e)
+    }
+  }
   messages.value = [{ role: 'assistant', content: '你好！我是阿强，您的量化交易助手。有什么我可以帮你的吗？' }]
 }
 </script>
@@ -183,6 +265,27 @@ const clearMessages = () => {
       <div class="flex items-center gap-2">
         <i class="pi pi-microchip-ai text-primary text-xl"></i>
         <span class="font-medium text-lg">阿强</span>
+        <!-- 模型状态指示 -->
+        <span
+          v-if="isLoadingModel"
+          class="text-xs text-surface-500 flex items-center gap-1">
+          <i class="pi pi-spin pi-spinner"></i>
+          加载模型中...
+        </span>
+        <span
+          v-else-if="loadError"
+          class="text-xs text-red-500 cursor-pointer"
+          v-tooltip="loadError"
+          @click="loadModel">
+          <i class="pi pi-exclamation-triangle"></i>
+          加载失败，点击重试
+        </span>
+        <span
+          v-else-if="isModelLoaded"
+          class="text-xs text-green-500">
+          <i class="pi pi-check-circle"></i>
+          已就绪
+        </span>
       </div>
       <Button
         icon="pi pi-refresh"
@@ -280,7 +383,8 @@ const clearMessages = () => {
             v-model="inputContent"
             rows="1"
             autoResize
-            placeholder="输入消息..."
+            :placeholder="isModelLoaded ? '输入消息...' : isLoadingModel ? '模型加载中...' : '模型未加载'"
+            :disabled="!isModelLoaded"
             class="w-full pr-12 max-h-32 !bg-surface-0 dark:!bg-surface-800"
             @keydown="handleKeydown" />
           <Button
@@ -289,7 +393,7 @@ const clearMessages = () => {
             text
             class="!absolute !right-2 !bottom-2 !w-8 !h-8"
             @click="sendMessage"
-            :disabled="!inputContent.trim() || isTyping" />
+            :disabled="!inputContent.trim() || isTyping || !isModelLoaded" />
         </div>
       </div>
     </div>
