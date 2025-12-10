@@ -230,13 +230,12 @@ const clearMessages = () => {
                   <!-- AI 消息 -->
                   <div
                     v-else
-                    class="max-w-[90%] whitespace-pre-wrap leading-relaxed break-words text-sm px-1 py-3 text-surface-900 dark:text-surface-50"
-                    :class="{ 'typing-text': messages[virtualRow.index]?.isTyping }">
+                    class="max-w-[90%] whitespace-pre-wrap leading-relaxed break-words text-sm px-1 py-3 text-surface-900 dark:text-surface-50">
                     {{ messages[virtualRow.index]?.content }}
                     <span
                       v-if="messages[virtualRow.index]?.isTyping"
-                      class="typing-cursor">
-                      |
+                      class="typing-dots">
+                      ...
                     </span>
                   </div>
                 </div>
@@ -298,41 +297,24 @@ const clearMessages = () => {
 </template>
 
 <style>
-/* 打字中的文字效果 */
-.typing-text {
-  background: linear-gradient(90deg, currentColor 0%, currentColor 85%, transparent 100%);
-  background-clip: text;
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-size: 100% 100%;
-  animation: typing-fade 0.3s ease-out;
+/* 打字中的省略号动画 */
+.typing-dots {
+  display: inline-block;
+  animation: dots 1.2s ease-in-out infinite;
+  color: var(--p-text-muted-color);
 }
 
-@keyframes typing-fade {
-  from {
-    background-size: 95% 100%;
-  }
-  to {
-    background-size: 100% 100%;
-  }
-}
-
-/* 打字光标闪烁 */
-.typing-cursor {
-  animation: blink 0.8s ease-in-out infinite;
-  color: var(--p-primary-color);
-  font-weight: bold;
-  -webkit-text-fill-color: var(--p-primary-color);
-}
-
-@keyframes blink {
+@keyframes dots {
   0%,
+  20% {
+    opacity: 0.3;
+  }
   50% {
     opacity: 1;
   }
-  51%,
+  80%,
   100% {
-    opacity: 0;
+    opacity: 0.3;
   }
 }
 
