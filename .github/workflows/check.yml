@@ -27,7 +27,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          prefix-key: check-clippy-${{ matrix.platform }}
+          prefix-key: check-${{ matrix.platform }}
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - run: cargo clippy --all-targets --all-features -- -D warnings

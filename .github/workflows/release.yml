@@ -1,10 +1,11 @@
-name: Release
+name: release
 
 on:
   workflow_dispatch:
 
 jobs:
-  publish-tauri:
+  build:
+    name: Build (${{ matrix.target }})
     permissions:
       contents: write
     strategy:
@@ -12,58 +13,44 @@ jobs:
       matrix:
         include:
           - platform: macos-latest
-            args: '--target aarch64-apple-darwin'
-          - platform: macos-latest
-            args: '--target x86_64-apple-darwin'
+            target: aarch64-apple-darwin
           - platform: windows-latest
-            args: ''
-
+            target: x86_64-pc-windows-msvc
     runs-on: ${{ matrix.platform }}
-
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v4
         with:
           version: 9
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: lts/*
           cache: pnpm
           cache-dependency-path: fuxi-quant-app/pnpm-lock.yaml
 
-      - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+          targets: ${{ matrix.target }}
 
-      - name: Rust cache
-        uses: swatinem/rust-cache@v2
+      - uses: swatinem/rust-cache@v2
         with:
-          prefix-key: release
+          prefix-key: release-${{ matrix.target }}
 
-      - name: Install frontend dependencies
+      - run: pnpm install
         working-directory: fuxi-quant-app
-        run: pnpm install
 
-      - name: 生成更新日志
-        id: changelog
+      - id: changelog
         shell: bash
         run: |
-          # 获取上一个 tag
           git fetch --tags --force
           PREVIOUS_TAG=$(git tag --sort=-creatordate | head -n 1)
-
           if [ -z "$PREVIOUS_TAG" ]; then
             COMMITS=$(git log --pretty=format:"- %s（%h）" --no-merges -20)
           else
             COMMITS=$(git log ${PREVIOUS_TAG}..HEAD --pretty=format:"- %s（%h）" --no-merges)
           fi
-
-          # 写入多行内容
           {
             echo 'body<<EOF'
             echo "## ✨ 更新内容"
@@ -90,27 +77,4 @@ jobs:
           releaseBody: ${{ steps.changelog.outputs.body }}
           releaseDraft: true
           prerelease: false
-          args: ${{ matrix.args }}
-
-  notify:
-    name: 发送通知
-    needs: publish-tauri
-    runs-on: ubuntu-latest
-    if: always()
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: 读取版本号
-        id: version
-        run: echo "version=$(jq -r .version fuxi-quant-app/src-tauri/tauri.conf.json)" >> $GITHUB_OUTPUT
-
-      - name: 发送发布邮件通知
-        uses: ./.github/actions/send-email
-        with:
-          status: ${{ needs.publish-tauri.result }}
-          type: 'release'
-          version: 'v${{ steps.version.outputs.version }}'
-          mail_username: ${{ secrets.MAIL_USERNAME }}
-          mail_password: ${{ secrets.MAIL_PASSWORD }}
-          mail_to: ${{ secrets.MAIL_TO }}
+          args: '--target ${{ matrix.target }}'
