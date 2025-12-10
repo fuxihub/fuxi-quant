@@ -23,6 +23,10 @@ jobs:
         with:
           lfs: true
 
+      - name: Install dependencies (macOS)
+        if: matrix.platform == 'macos-latest'
+        run: brew install cmake
+
       - uses: pnpm/action-setup@v4
         with:
           version: 9
