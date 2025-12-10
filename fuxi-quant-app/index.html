@@ -6,7 +6,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>伏羲量化</title>
     <style>
-      /* 初始加载状态 */
       #app-loading {
         position: fixed;
         inset: 0;
@@ -18,16 +17,10 @@
       @media (prefers-color-scheme: dark) {
         #app-loading { background: #09090b; }
       }
-      .loading-spinner {
-        width: 32px;
-        height: 32px;
-        border: 3px solid #e5e5e5;
-        border-top-color: #3b82f6;
-        border-radius: 50%;
-        animation: spin 0.8s linear infinite;
-      }
-      @media (prefers-color-scheme: dark) {
-        .loading-spinner { border-color: #333; border-top-color: #3b82f6; }
+      .loading-logo {
+        width: 48px;
+        height: 48px;
+        animation: spin 1.5s linear infinite;
       }
       @keyframes spin { to { transform: rotate(360deg); } }
     </style>
@@ -35,9 +28,8 @@
 
   <body>
     <div id="app">
-      <!-- Vue 挂载前显示加载状态 -->
       <div id="app-loading">
-        <div class="loading-spinner"></div>
+        <img src="/logo.svg" class="loading-logo" alt="loading" />
       </div>
     </div>
     <script type="module" src="/src/main.js"></script>
