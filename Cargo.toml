@@ -26,6 +26,7 @@ strip = "symbols"
 [workspace.dependencies]
 fuxi-quant-core = { path = "./fuxi-quant-core" }
 fuxi-quant-runtime = { path = "./fuxi-quant-runtime" }
+fuxi-quant-agent = { path = "./fuxi-quant-agent" }
 anyhow = { version = "1.0" }
 tokio = { version = "1.47", features = ["full"] }
 chrono = { version = "0.4", features = ["serde"] }

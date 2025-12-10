@@ -1659,6 +1659,7 @@ dependencies = [
 name = "fuxi-quant-app"
 version = "1.0.0"
 dependencies = [
+ "fuxi-quant-agent",
  "serde",
  "serde_json",
  "tauri",
