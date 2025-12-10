@@ -536,6 +536,11 @@ const toggleThinking = (index) => {
 }
 
 /* Markdown 内容样式 */
+.markdown-content {
+  white-space: normal; /* 覆盖外层 whitespace-pre-wrap，避免多余空白 */
+  line-height: 1.6;
+}
+
 .markdown-content p {
   margin: 0.3em 0;
 }
@@ -568,7 +573,7 @@ const toggleThinking = (index) => {
 .markdown-content ul,
 .markdown-content ol {
   display: block;
-  margin: 0.3em 0;
+  margin: 0.2em 0;
   padding: 0 0 0 1.5em;
 }
 
@@ -583,11 +588,11 @@ const toggleThinking = (index) => {
   display: list-item;
   margin: 0;
   padding: 0;
-  line-height: 1.6;
+  line-height: 1.5;
 }
 
 .markdown-content li + li {
-  margin-top: 0.15em;
+  margin-top: 0.1em;
 }
 
 .markdown-content li > p,
