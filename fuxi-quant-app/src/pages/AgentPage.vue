@@ -106,6 +106,7 @@ const sendMessage = async () => {
     content: '',
     isTyping: true,
     thinkingCollapsed: false, // thinking 折叠状态
+    thinkingFollowBottom: true, // thinking 内容跟随底部
   })
 
   // 滚动到底部（watch 会在测量后自动滚动）
@@ -164,6 +165,16 @@ const renderLoop = () => {
     // 检测 thinking 结束，立即折叠
     if (!currentMsg.thinkingCollapsed && currentMsg.content.includes('</think>')) {
       currentMsg.thinkingCollapsed = true
+    }
+
+    // thinking 内容跟随滚动
+    if (currentMsg.thinkingFollowBottom && !currentMsg.thinkingCollapsed) {
+      nextTick(() => {
+        const thinkingEl = document.querySelector('.thinking-content-active')
+        if (thinkingEl) {
+          thinkingEl.scrollTop = thinkingEl.scrollHeight
+        }
+      })
     }
 
     // 跟随滚动
@@ -240,6 +251,14 @@ const clearMessages = async () => {
   }
   messages.value = []
 }
+
+// 切换 thinking 折叠状态
+const toggleThinking = (index) => {
+  const msg = messages.value[index]
+  if (msg) {
+    msg.thinkingCollapsed = !msg.thinkingCollapsed
+  }
+}
 </script>
 
 <template>
@@ -301,33 +320,29 @@ const clearMessages = async () => {
                     class="max-w-[90%] whitespace-pre-wrap leading-relaxed break-words text-sm px-1 py-3 text-surface-900 dark:text-surface-50">
                     <!-- Thinking 内容 -->
                     <template v-if="parseThinking(messages[virtualRow.index]?.content).thinking !== null">
-                      <!-- 折叠的 thinking -->
+                      <!-- 思考过程标题（始终显示，用 v-show 切换图标和内容） -->
                       <div
-                        v-if="messages[virtualRow.index]?.thinkingCollapsed"
-                        class="thinking-collapsed flex items-center gap-1 text-surface-400 text-xs mb-2 cursor-pointer hover:text-surface-600 dark:hover:text-surface-300"
-                        @click="messages[virtualRow.index].thinkingCollapsed = false">
-                        <i class="pi pi-chevron-right text-xs"></i>
+                        class="flex items-center gap-1 text-surface-400 text-xs mb-1 cursor-pointer hover:text-surface-600 dark:hover:text-surface-300 select-none"
+                        @click.stop.prevent="toggleThinking(virtualRow.index)">
+                        <i
+                          class="pi text-xs"
+                          :class="
+                            messages[virtualRow.index]?.thinkingCollapsed ? 'pi-chevron-right' : 'pi-chevron-down'
+                          "></i>
                         <span>思考过程</span>
+                        <span
+                          v-if="!parseThinking(messages[virtualRow.index]?.content).isThinkingComplete"
+                          class="typing-dots">
+                          ...
+                        </span>
                       </div>
-                      <!-- 展开的 thinking -->
+                      <!-- 展开的内容（用 v-show 保持 DOM 不销毁） -->
                       <div
-                        v-else
-                        class="thinking-expanded mb-3">
-                        <div
-                          class="flex items-center gap-1 text-surface-400 text-xs mb-1 cursor-pointer hover:text-surface-600 dark:hover:text-surface-300"
-                          @click="messages[virtualRow.index].thinkingCollapsed = true">
-                          <i class="pi pi-chevron-down text-xs transition-transform duration-200"></i>
-                          <span>思考过程</span>
-                          <span
-                            v-if="!parseThinking(messages[virtualRow.index]?.content).isThinkingComplete"
-                            class="typing-dots">
-                            ...
-                          </span>
-                        </div>
-                        <div
-                          class="thinking-content text-surface-400 dark:text-surface-500 text-xs pl-4 border-l-2 border-surface-200 dark:border-surface-700">
-                          {{ parseThinking(messages[virtualRow.index]?.content).thinking }}
-                        </div>
+                        v-show="!messages[virtualRow.index]?.thinkingCollapsed"
+                        class="thinking-content text-surface-400 dark:text-surface-500 text-xs pl-4 mb-3 border-l-2 border-surface-200 dark:border-surface-700"
+                        :class="{ 'thinking-content-active': messages[virtualRow.index]?.isTyping }"
+                        @wheel.stop="messages[virtualRow.index].thinkingFollowBottom = false">
+                        {{ parseThinking(messages[virtualRow.index]?.content).thinking }}
                       </div>
                       <!-- 正式回复 -->
                       <div v-if="parseThinking(messages[virtualRow.index]?.content).response">
@@ -480,5 +495,6 @@ const clearMessages = async () => {
   max-height: 15em; /* 约 10 行 */
   line-height: 1.5;
   overflow-y: auto;
+  padding-right: 0.75rem; /* 右边距，避免贴着滚动条 */
 }
 </style>
