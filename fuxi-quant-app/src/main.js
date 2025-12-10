@@ -7,6 +7,8 @@ import 'primeicons/primeicons.css';
 import '@/style.css';
 import App from '@/App.vue';
 import router from '@/router';
+import { invoke } from '@tauri-apps/api/core';
+import { resolveResource } from '@tauri-apps/api/path';
 
 const app = createApp(App);
 
@@ -31,20 +33,25 @@ app.use(PrimeVue, {
 app.directive('ripple', Ripple);
 app.directive('tooltip', Tooltip);
 
-// 延迟 3 秒后显示应用，带退出动画
-const startTime = Date.now();
-const MIN_LOADING_TIME = 3000;
+// 加载模型后显示应用
 
 const showApp = () => {
     const logo = document.querySelector('.loading-logo');
     if (logo) {
         logo.classList.add('fade-out');
-        setTimeout(() => app.mount("#app"), 800); // 与动画时长匹配
+        setTimeout(() => app.mount("#app"), 800);
     } else {
         app.mount("#app");
     }
 };
 
-const elapsed = Date.now() - startTime;
-const remaining = Math.max(0, MIN_LOADING_TIME - elapsed);
-setTimeout(showApp, remaining);
+// 加载模型
+(async () => {
+    try {
+        const modelPath = await resolveResource('resources/Qwen3-0.6B-Q8_0.gguf');
+        await invoke('load_model', { modelPath });
+    } catch (e) {
+        console.error('模型加载失败:', e);
+    }
+    showApp();
+})();

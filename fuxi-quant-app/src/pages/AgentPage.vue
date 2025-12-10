@@ -1,16 +1,14 @@
 <script setup>
-import { ref, computed, nextTick, watch, onMounted } from 'vue'
+import { ref, computed, nextTick, watch } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { invoke, Channel } from '@tauri-apps/api/core'
-import { resolveResource } from '@tauri-apps/api/path'
 
 // ============ 常量配置 ============
-const MAX_MESSAGES = 200 // 最大消息数量限制
-const TYPING_SPEED = { slow: 2, normal: 4, fast: 8 } // 打字速度（字符/帧）
-const MODEL_NAME = 'resources/Qwen3-0.6B-Q8_0.gguf' // 模型资源路径
+const MAX_MESSAGES = 200
+const TYPING_SPEED = { slow: 2, normal: 4, fast: 8 }
 
 // ============ 状态 ============
-const messages = ref([{ role: 'assistant', content: '你好！我是阿强，您的量化交易助手。有什么我可以帮你的吗？' }])
+const messages = ref([])
 const inputContent = ref('')
 const parentRef = ref(null)
 const isTyping = ref(false)
@@ -18,33 +16,6 @@ const pendingQueue = ref('')
 const isReceiving = ref(false)
 const isAtBottom = ref(true)
 const shouldFollowBottom = ref(true)
-const isModelLoaded = ref(false)
-const isLoadingModel = ref(false)
-const loadError = ref('')
-
-// ============ 模型加载 ============
-const loadModel = async () => {
-  if (isModelLoaded.value || isLoadingModel.value) return
-
-  isLoadingModel.value = true
-  loadError.value = ''
-
-  try {
-    const modelPath = await resolveResource(MODEL_NAME)
-    await invoke('load_model', { modelPath })
-    isModelLoaded.value = true
-  } catch (e) {
-    loadError.value = `模型加载失败: ${e}`
-    console.error('模型加载失败:', e)
-  } finally {
-    isLoadingModel.value = false
-  }
-}
-
-// 组件挂载时加载模型
-onMounted(() => {
-  loadModel()
-})
 
 // ============ 虚拟滚动配置 ============
 const virtualizerOptions = computed(() => ({
@@ -75,18 +46,6 @@ watch(
 // ============ 发送消息 ============
 const sendMessage = async () => {
   if (!inputContent.value.trim() || isTyping.value) return
-
-  // 模型未加载时提示
-  if (!isModelLoaded.value) {
-    if (isLoadingModel.value) {
-      return // 正在加载中
-    }
-    // 尝试重新加载
-    await loadModel()
-    if (!isModelLoaded.value) {
-      return
-    }
-  }
 
   // 清理历史消息的打字状态，释放内存
   messages.value.forEach((msg) => {
@@ -232,12 +191,10 @@ const handleKeydown = (e) => {
 }
 
 const clearMessages = async () => {
-  if (isModelLoaded.value) {
-    try {
-      await invoke('reset_chat')
-    } catch (e) {
-      console.error('重置会话失败:', e)
-    }
+  try {
+    await invoke('reset_chat')
+  } catch (e) {
+    console.error('重置会话失败:', e)
   }
   messages.value = [{ role: 'assistant', content: '你好！我是阿强，您的量化交易助手。有什么我可以帮你的吗？' }]
 }
@@ -252,27 +209,6 @@ const clearMessages = async () => {
       <div class="flex items-center gap-2">
         <i class="pi pi-microchip-ai text-primary text-xl"></i>
         <span class="font-medium text-lg">阿强</span>
-        <!-- 模型状态指示 -->
-        <span
-          v-if="isLoadingModel"
-          class="text-xs text-surface-500 flex items-center gap-1">
-          <i class="pi pi-spin pi-spinner"></i>
-          加载模型中...
-        </span>
-        <span
-          v-else-if="loadError"
-          class="text-xs text-red-500 cursor-pointer"
-          v-tooltip="loadError"
-          @click="loadModel">
-          <i class="pi pi-exclamation-triangle"></i>
-          加载失败，点击重试
-        </span>
-        <span
-          v-else-if="isModelLoaded"
-          class="text-xs text-green-500">
-          <i class="pi pi-check-circle"></i>
-          已就绪
-        </span>
       </div>
       <Button
         icon="pi pi-refresh"
@@ -338,7 +274,7 @@ const clearMessages = async () => {
           v-if="messages.length === 0"
           class="absolute inset-0 flex flex-col items-center justify-center text-surface-400">
           <i class="pi pi-comments text-4xl mb-2"></i>
-          <p>开始对话吧</p>
+          <p>我是阿强，您的量化助手。</p>
         </div>
       </div>
 
@@ -370,8 +306,7 @@ const clearMessages = async () => {
             v-model="inputContent"
             rows="1"
             autoResize
-            :placeholder="isModelLoaded ? '输入消息...' : isLoadingModel ? '模型加载中...' : '模型未加载'"
-            :disabled="!isModelLoaded"
+            placeholder="输入消息..."
             class="w-full pr-12 max-h-32 !bg-surface-0 dark:!bg-surface-800"
             @keydown="handleKeydown" />
           <Button
@@ -380,7 +315,7 @@ const clearMessages = async () => {
             text
             class="!absolute !right-2 !bottom-2 !w-8 !h-8"
             @click="sendMessage"
-            :disabled="!inputContent.trim() || isTyping || !isModelLoaded" />
+            :disabled="!inputContent.trim() || isTyping" />
         </div>
       </div>
     </div>
