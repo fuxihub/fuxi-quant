@@ -8,6 +8,7 @@ const isTyping = ref(false)
 const pendingQueue = ref('')
 const isReceiving = ref(false)
 const isAtBottom = ref(true)
+const shouldFollowBottom = ref(true) // 是否应该跟随滚动到底部（用户主动触发时为 true）
 
 const sendMessage = async () => {
   if (!inputContent.value.trim() || isTyping.value) return
@@ -35,9 +36,11 @@ const sendMessage = async () => {
   }
   messages.value.push(aiMsg)
 
-  // 发送消息时，强制滚动到底部，并标记为在底部
+  // 发送消息时，强制开启跟随模式并滚动到底部
+  shouldFollowBottom.value = true
   isAtBottom.value = true
-  await scrollToBottom()
+  await nextTick()
+  scrollToBottomInstant()
 
   // 模拟 AI 回复
   isTyping.value = true
@@ -91,8 +94,9 @@ const renderLoop = async () => {
       currentMsg.chunks.push(...newChunks)
     }
 
-    if (isAtBottom.value) {
-      await scrollToBottom()
+    // 只有在跟随模式下才自动滚动（使用 instant 避免卡顿）
+    if (shouldFollowBottom.value) {
+      scrollToBottomInstant()
     }
   }
 
@@ -107,15 +111,39 @@ const renderLoop = async () => {
 const checkScroll = () => {
   if (!messagesContainer.value) return
   const { scrollTop, scrollHeight, clientHeight } = messagesContainer.value
+  const distanceFromBottom = scrollHeight - scrollTop - clientHeight
   // 阈值设为 30px
-  isAtBottom.value = scrollHeight - scrollTop - clientHeight < 30
+  isAtBottom.value = distanceFromBottom < 30
 }
 
-const scrollToBottom = async () => {
-  await nextTick()
+// 用户主动滚动（wheel 事件只有用户操作才触发，程序设置 scrollTop 不会触发）
+const handleWheel = () => {
+  // 用户滚动时立即关闭跟随模式
+  shouldFollowBottom.value = false
+}
+
+// 立即滚动（用于 renderLoop，无动画避免卡顿）
+const scrollToBottomInstant = () => {
   if (messagesContainer.value) {
     messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight
   }
+}
+
+// 平滑滚动（用于用户点击按钮）
+const scrollToBottomSmooth = async () => {
+  await nextTick()
+  if (messagesContainer.value) {
+    messagesContainer.value.scrollTo({
+      top: messagesContainer.value.scrollHeight,
+      behavior: 'smooth',
+    })
+  }
+}
+
+const handleScrollToBottom = () => {
+  shouldFollowBottom.value = true
+  isAtBottom.value = true
+  scrollToBottomSmooth()
 }
 
 const handleKeydown = (e) => {
@@ -146,48 +174,70 @@ const handleKeydown = (e) => {
     </div>
 
     <!-- 消息列表 -->
-    <div
-      ref="messagesContainer"
-      class="flex-1 overflow-y-auto p-4 flex flex-col gap-4"
-      @scroll="checkScroll">
+    <div class="relative flex-1 overflow-hidden">
       <div
-        v-for="(msg, index) in messages"
-        :key="index"
-        class="flex max-w-[85%]"
-        :class="{ 'self-end': msg.role === 'user', 'self-start': msg.role === 'assistant' }">
-        <!-- 消息气泡 -->
+        ref="messagesContainer"
+        class="absolute inset-0 overflow-y-auto p-4 flex flex-col gap-4"
+        @scroll="checkScroll"
+        @wheel="handleWheel">
         <div
-          v-if="msg.role === 'user'"
-          class="whitespace-pre-wrap leading-relaxed break-words text-sm p-3 rounded-lg shadow-sm bg-primary text-primary-contrast">
-          {{ msg.content }}
-        </div>
-        <div
-          v-else
-          class="whitespace-pre-wrap leading-relaxed break-words text-sm px-1 py-3 text-surface-900 dark:text-surface-50">
-          <template v-if="msg.chunks">
-            <template
-              v-for="chunk in msg.chunks"
-              :key="chunk.key">
-              <br v-if="chunk.type === 'br'" />
-              <span
-                v-else
-                class="typing-char">
-                {{ chunk.value }}
-              </span>
-            </template>
-          </template>
-          <span
+          v-for="(msg, index) in messages"
+          :key="index"
+          class="flex max-w-[85%]"
+          :class="{ 'self-end': msg.role === 'user', 'self-start': msg.role === 'assistant' }">
+          <!-- 消息气泡 -->
+          <div
+            v-if="msg.role === 'user'"
+            class="whitespace-pre-wrap leading-relaxed break-words text-sm p-3 rounded-lg shadow-sm bg-surface-100 dark:bg-surface-700 text-surface-900 dark:text-surface-50">
+            {{ msg.content }}
+          </div>
+          <div
             v-else
-            v-html="msg.content"></span>
+            class="whitespace-pre-wrap leading-relaxed break-words text-sm px-1 py-3 text-surface-900 dark:text-surface-50">
+            <template v-if="msg.chunks">
+              <template
+                v-for="chunk in msg.chunks"
+                :key="chunk.key">
+                <br v-if="chunk.type === 'br'" />
+                <span
+                  v-else
+                  class="typing-char">
+                  {{ chunk.value }}
+                </span>
+              </template>
+            </template>
+            <span
+              v-else
+              v-html="msg.content"></span>
+          </div>
+        </div>
+
+        <div
+          v-if="messages.length === 0"
+          class="flex-1 flex flex-col items-center justify-center text-surface-400">
+          <i class="pi pi-comments text-4xl mb-2"></i>
+          <p>开始对话吧</p>
         </div>
       </div>
 
-      <div
-        v-if="messages.length === 0"
-        class="flex-1 flex flex-col items-center justify-center text-surface-400">
-        <i class="pi pi-comments text-4xl mb-2"></i>
-        <p>开始对话吧</p>
-      </div>
+      <!-- 滚动到底部按钮 -->
+      <Transition name="scroll-btn">
+        <div
+          v-if="!isAtBottom"
+          class="absolute bottom-4 left-1/2 -translate-x-1/2">
+          <div
+            class="scroll-btn-wrapper"
+            :class="{ 'is-typing': isTyping }">
+            <Button
+              icon="pi pi-chevron-down"
+              rounded
+              severity="secondary"
+              class="!shadow-lg"
+              v-tooltip.top="'滚动到底部'"
+              @click="handleScrollToBottom" />
+          </div>
+        </div>
+      </Transition>
     </div>
 
     <!-- 输入区域 -->
@@ -230,6 +280,53 @@ const handleKeydown = (e) => {
     opacity: 1;
     transform: translateY(0);
     filter: blur(0);
+  }
+}
+
+/* 滚动到底部按钮过渡动画 */
+.scroll-btn-enter-active,
+.scroll-btn-leave-active {
+  transition: all 0.2s ease-out;
+}
+
+.scroll-btn-enter-from,
+.scroll-btn-leave-to {
+  opacity: 0;
+  transform: translateY(10px);
+}
+
+/* 滚动按钮旋转边框动画 */
+.scroll-btn-wrapper {
+  position: relative;
+  border-radius: 50%;
+}
+
+.scroll-btn-wrapper::before {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  padding: 3px;
+  background: conic-gradient(from 0deg, transparent 0deg, var(--p-primary-color) 90deg, transparent 90deg);
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.scroll-btn-wrapper.is-typing::before {
+  opacity: 1;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
   }
 }
 </style>
