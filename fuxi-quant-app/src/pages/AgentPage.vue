@@ -177,46 +177,48 @@ const handleKeydown = (e) => {
     <div class="relative flex-1 overflow-hidden">
       <div
         ref="messagesContainer"
-        class="absolute inset-0 overflow-y-auto p-4 flex flex-col gap-4"
+        class="absolute inset-0 overflow-y-auto p-4"
         @scroll="checkScroll"
         @wheel="handleWheel">
-        <div
-          v-for="(msg, index) in messages"
-          :key="index"
-          class="flex max-w-[85%]"
-          :class="{ 'self-end': msg.role === 'user', 'self-start': msg.role === 'assistant' }">
-          <!-- 消息气泡 -->
+        <div class="max-w-[960px] mx-auto w-full flex flex-col gap-4">
           <div
-            v-if="msg.role === 'user'"
-            class="whitespace-pre-wrap leading-relaxed break-words text-sm p-3 rounded-lg shadow-sm bg-surface-100 dark:bg-surface-700 text-surface-900 dark:text-surface-50">
-            {{ msg.content }}
-          </div>
-          <div
-            v-else
-            class="whitespace-pre-wrap leading-relaxed break-words text-sm px-1 py-3 text-surface-900 dark:text-surface-50">
-            <template v-if="msg.chunks">
-              <template
-                v-for="chunk in msg.chunks"
-                :key="chunk.key">
-                <br v-if="chunk.type === 'br'" />
-                <span
-                  v-else
-                  class="typing-char">
-                  {{ chunk.value }}
-                </span>
-              </template>
-            </template>
-            <span
+            v-for="(msg, index) in messages"
+            :key="index"
+            class="flex w-full"
+            :class="{ 'justify-end': msg.role === 'user', 'justify-start': msg.role === 'assistant' }">
+            <!-- 消息气泡 -->
+            <div
+              v-if="msg.role === 'user'"
+              class="whitespace-pre-wrap leading-relaxed break-words text-sm p-3 rounded-lg shadow-sm bg-surface-100 dark:bg-surface-700 text-surface-900 dark:text-surface-50">
+              {{ msg.content }}
+            </div>
+            <div
               v-else
-              v-html="msg.content"></span>
+              class="whitespace-pre-wrap leading-relaxed break-words text-sm px-1 py-3 text-surface-900 dark:text-surface-50">
+              <template v-if="msg.chunks">
+                <template
+                  v-for="chunk in msg.chunks"
+                  :key="chunk.key">
+                  <br v-if="chunk.type === 'br'" />
+                  <span
+                    v-else
+                    class="typing-char">
+                    {{ chunk.value }}
+                  </span>
+                </template>
+              </template>
+              <span
+                v-else
+                v-html="msg.content"></span>
+            </div>
           </div>
-        </div>
 
-        <div
-          v-if="messages.length === 0"
-          class="flex-1 flex flex-col items-center justify-center text-surface-400">
-          <i class="pi pi-comments text-4xl mb-2"></i>
-          <p>开始对话吧</p>
+          <div
+            v-if="messages.length === 0"
+            class="flex-1 flex flex-col items-center justify-center text-surface-400">
+            <i class="pi pi-comments text-4xl mb-2"></i>
+            <p>开始对话吧</p>
+          </div>
         </div>
       </div>
 
@@ -242,23 +244,24 @@ const handleKeydown = (e) => {
 
     <!-- 输入区域 -->
     <div class="flex-none p-4 border-t border-surface-200 dark:border-surface-700 bg-surface-50 dark:bg-surface-900/50">
-      <div class="relative w-full">
-        <Textarea
-          v-model="inputContent"
-          rows="1"
-          autoResize
-          placeholder="输入消息..."
-          class="w-full pr-12 max-h-32 !bg-surface-0 dark:!bg-surface-800"
-          @keydown="handleKeydown" />
-        <Button
-          icon="pi pi-send"
-          rounded
-          text
-          class="!absolute !right-2 !bottom-2 !w-8 !h-8"
-          @click="sendMessage"
-          :disabled="!inputContent.trim() || isTyping" />
+      <div class="max-w-[960px] mx-auto w-full">
+        <div class="relative">
+          <Textarea
+            v-model="inputContent"
+            rows="1"
+            autoResize
+            placeholder="输入消息..."
+            class="w-full pr-12 max-h-32 !bg-surface-0 dark:!bg-surface-800"
+            @keydown="handleKeydown" />
+          <Button
+            icon="pi pi-send"
+            rounded
+            text
+            class="!absolute !right-2 !bottom-2 !w-8 !h-8"
+            @click="sendMessage"
+            :disabled="!inputContent.trim() || isTyping" />
+        </div>
       </div>
-      <div class="text-xs text-surface-500 mt-2 text-center select-none">按 Enter 发送，Shift + Enter 换行</div>
     </div>
   </div>
 </template>
