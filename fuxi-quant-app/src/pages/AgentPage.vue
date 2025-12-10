@@ -2,6 +2,27 @@
 import { ref, computed, nextTick, watch, onMounted } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { invoke, Channel } from '@tauri-apps/api/core'
+import { marked } from 'marked'
+import { markedHighlight } from 'marked-highlight'
+import hljs from 'highlight.js'
+
+// ============ Markdown 配置 ============
+marked.use(
+  markedHighlight({
+    highlight: (code, lang) => {
+      if (lang && hljs.getLanguage(lang)) {
+        return hljs.highlight(code, { language: lang }).value
+      }
+      return code
+    },
+  }),
+  { breaks: true, gfm: true }
+)
+
+const renderMarkdown = (content) => {
+  if (!content) return ''
+  return marked.parse(content)
+}
 
 // 进入页面时重置会话，确保前后端同步
 onMounted(async () => {
@@ -356,14 +377,17 @@ const toggleThinking = (index) => {
                         @wheel.stop="messages[virtualRow.index].thinkingFollowBottom = false">
                         {{ parseThinking(messages[virtualRow.index]?.content).thinking }}
                       </div>
-                      <!-- 正式回复 -->
-                      <div v-if="parseThinking(messages[virtualRow.index]?.content).response">
-                        {{ parseThinking(messages[virtualRow.index]?.content).response }}
-                      </div>
+                      <!-- 正式回复 (Markdown) -->
+                      <div
+                        v-if="parseThinking(messages[virtualRow.index]?.content).response"
+                        class="markdown-content"
+                        v-html="renderMarkdown(parseThinking(messages[virtualRow.index]?.content).response)"></div>
                     </template>
-                    <!-- 无 thinking 的普通消息 -->
+                    <!-- 无 thinking 的普通消息 (Markdown) -->
                     <template v-else>
-                      {{ messages[virtualRow.index]?.content }}
+                      <div
+                        class="markdown-content"
+                        v-html="renderMarkdown(messages[virtualRow.index]?.content)"></div>
                     </template>
                     <span
                       v-if="
@@ -509,5 +533,273 @@ const toggleThinking = (index) => {
   line-height: 1.5;
   overflow-y: auto;
   padding-right: 0.75rem; /* 右边距，避免贴着滚动条 */
+}
+
+/* Markdown 内容样式 */
+.markdown-content {
+  line-height: 1.5;
+}
+
+.markdown-content p {
+  margin: 0.25em 0;
+}
+
+.markdown-content p:first-child {
+  margin-top: 0;
+}
+.markdown-content p:last-child {
+  margin-bottom: 0;
+}
+
+.markdown-content h1,
+.markdown-content h2,
+.markdown-content h3 {
+  font-weight: 600;
+  margin: 0.75em 0 0.25em;
+}
+
+.markdown-content h1 {
+  font-size: 1.25em;
+}
+.markdown-content h2 {
+  font-size: 1.1em;
+}
+.markdown-content h3 {
+  font-size: 1em;
+}
+
+.markdown-content ul,
+.markdown-content ol {
+  margin: 0;
+  padding-left: 1.25em;
+  list-style-position: outside;
+}
+
+.markdown-content > ul,
+.markdown-content > ol {
+  margin: 0.25em 0;
+}
+
+.markdown-content li {
+  margin: 0;
+  padding: 0;
+}
+
+.markdown-content li > p {
+  margin: 0;
+}
+
+.markdown-content li > ul,
+.markdown-content li > ol {
+  margin: 0;
+}
+
+.markdown-content code {
+  background: var(--p-surface-100);
+  padding: 0.1em 0.3em;
+  border-radius: 3px;
+  font-size: 0.875em;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.app-dark .markdown-content code {
+  background: var(--p-surface-700);
+}
+
+.markdown-content pre {
+  background: var(--p-surface-100);
+  padding: 0.75em;
+  border-radius: 6px;
+  overflow-x: auto;
+  margin: 0.5em 0;
+  line-height: 1.4;
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.markdown-content pre::-webkit-scrollbar {
+  display: none;
+}
+
+.app-dark .markdown-content pre {
+  background: var(--p-surface-800);
+}
+
+.markdown-content pre code {
+  background: transparent;
+  padding: 0;
+  font-size: 0.8125em;
+}
+
+.markdown-content blockquote {
+  border-left: 2px solid var(--p-primary-color);
+  padding-left: 0.75em;
+  margin: 0.5em 0;
+  color: var(--p-text-muted-color);
+}
+
+.markdown-content table {
+  border-collapse: collapse;
+  margin: 0.5em 0;
+}
+
+.markdown-content th,
+.markdown-content td {
+  border: 1px solid var(--p-surface-200);
+  padding: 0.35em 0.5em;
+}
+
+.app-dark .markdown-content th,
+.app-dark .markdown-content td {
+  border-color: var(--p-surface-700);
+}
+
+.markdown-content th {
+  background: var(--p-surface-50);
+  font-weight: 600;
+}
+
+.app-dark .markdown-content th {
+  background: var(--p-surface-800);
+}
+
+.markdown-content a {
+  color: var(--p-primary-color);
+}
+
+.markdown-content hr {
+  border: none;
+  border-top: 1px solid var(--p-surface-200);
+  margin: 0.75em 0;
+}
+
+.app-dark .markdown-content hr {
+  border-color: var(--p-surface-700);
+}
+
+/* Highlight.js 代码高亮 - 浅色主题 */
+.hljs-comment,
+.hljs-quote {
+  color: #6a737d;
+}
+.hljs-keyword,
+.hljs-selector-tag {
+  color: #d73a49;
+}
+.hljs-string,
+.hljs-attr {
+  color: #032f62;
+}
+.hljs-number,
+.hljs-literal {
+  color: #005cc5;
+}
+.hljs-variable,
+.hljs-template-variable {
+  color: #e36209;
+}
+.hljs-tag {
+  color: #22863a;
+}
+.hljs-name,
+.hljs-selector-id,
+.hljs-selector-class {
+  color: #6f42c1;
+}
+.hljs-function {
+  color: #6f42c1;
+}
+.hljs-built_in {
+  color: #005cc5;
+}
+.hljs-type,
+.hljs-class {
+  color: #6f42c1;
+}
+.hljs-title {
+  color: #6f42c1;
+}
+.hljs-params {
+  color: #24292e;
+}
+.hljs-regexp {
+  color: #032f62;
+}
+.hljs-symbol {
+  color: #005cc5;
+}
+.hljs-meta {
+  color: #6a737d;
+}
+.hljs-deletion {
+  color: #cb2431;
+  background: #ffeef0;
+}
+.hljs-addition {
+  color: #22863a;
+  background: #e6ffed;
+}
+
+/* Highlight.js 代码高亮 - 暗色主题 */
+.app-dark .hljs-comment,
+.app-dark .hljs-quote {
+  color: #8b949e;
+}
+.app-dark .hljs-keyword,
+.app-dark .hljs-selector-tag {
+  color: #ff7b72;
+}
+.app-dark .hljs-string,
+.app-dark .hljs-attr {
+  color: #a5d6ff;
+}
+.app-dark .hljs-number,
+.app-dark .hljs-literal {
+  color: #79c0ff;
+}
+.app-dark .hljs-variable,
+.app-dark .hljs-template-variable {
+  color: #ffa657;
+}
+.app-dark .hljs-tag {
+  color: #7ee787;
+}
+.app-dark .hljs-name,
+.app-dark .hljs-selector-id,
+.app-dark .hljs-selector-class {
+  color: #d2a8ff;
+}
+.app-dark .hljs-function {
+  color: #d2a8ff;
+}
+.app-dark .hljs-built_in {
+  color: #79c0ff;
+}
+.app-dark .hljs-type,
+.app-dark .hljs-class {
+  color: #d2a8ff;
+}
+.app-dark .hljs-title {
+  color: #d2a8ff;
+}
+.app-dark .hljs-params {
+  color: #c9d1d9;
+}
+.app-dark .hljs-regexp {
+  color: #a5d6ff;
+}
+.app-dark .hljs-symbol {
+  color: #79c0ff;
+}
+.app-dark .hljs-meta {
+  color: #8b949e;
+}
+.app-dark .hljs-deletion {
+  color: #ffa198;
+  background: rgba(248, 81, 73, 0.1);
+}
+.app-dark .hljs-addition {
+  color: #7ee787;
+  background: rgba(46, 160, 67, 0.15);
 }
 </style>
