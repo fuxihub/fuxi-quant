@@ -1,9 +1,11 @@
 use anyhow::{Result, ensure};
 use llama_cpp_2::{
+    LogOptions,
     context::{LlamaContext, params::LlamaContextParams},
     llama_backend::LlamaBackend,
     llama_batch::LlamaBatch,
     model::{AddBos, LlamaModel, Special, params::LlamaModelParams},
+    send_logs_to_tracing,
     token::data_array::LlamaTokenDataArray,
 };
 use std::{num::NonZeroU32, path::Path};
@@ -78,6 +80,10 @@ impl Qwen3Llama {
         n_gpu_layers: u32,
     ) -> Result<Self> {
         ensure!(n_ctx > 0, "n_ctx must be > 0");
+
+        // 禁用 llama.cpp 底层日志输出
+        send_logs_to_tracing(LogOptions::default().with_logs_enabled(false));
+
         let backend = LlamaBackend::init()?;
         let model_params = LlamaModelParams::default().with_n_gpu_layers(n_gpu_layers);
         let model = LlamaModel::load_from_file(&backend, model_path.as_ref(), &model_params)?;
