@@ -44,11 +44,6 @@ impl SamplingParams {
             presence_penalty: 1.5,
         }
     }
-
-    /// Non-Thinking 模式采样参数
-    pub fn non_thinking() -> Self {
-        Self::default()
-    }
 }
 
 /// 简单的 Qwen3 GGUF 推理封装（基于 llama-cpp-2）
