@@ -536,74 +536,70 @@ const toggleThinking = (index) => {
 }
 
 /* Markdown 内容样式 */
-.markdown-content {
-  line-height: 1.5;
-}
 
-.markdown-content p {
-  margin: 0.25em 0;
-}
-
-.markdown-content p:first-child {
-  margin-top: 0;
-}
-.markdown-content p:last-child {
-  margin-bottom: 0;
+.markdown-content strong {
+  font-weight: 600;
 }
 
 .markdown-content h1,
 .markdown-content h2,
-.markdown-content h3 {
+.markdown-content h3,
+.markdown-content h4 {
   font-weight: 600;
-  margin: 0.75em 0 0.25em;
+  margin: 0.8em 0 0.3em;
 }
 
 .markdown-content h1 {
   font-size: 1.25em;
 }
 .markdown-content h2 {
-  font-size: 1.1em;
+  font-size: 1.15em;
 }
 .markdown-content h3 {
+  font-size: 1.05em;
+}
+.markdown-content h4 {
   font-size: 1em;
 }
 
 .markdown-content ul,
 .markdown-content ol {
-  margin: 0;
-  padding-left: 1.25em;
-  list-style-position: outside;
+  margin: 0.3em 0;
+  padding-left: 1.5em;
 }
 
-.markdown-content > ul,
-.markdown-content > ol {
-  margin: 0.25em 0;
+.markdown-content ul {
+  list-style-type: disc;
+}
+.markdown-content ol {
+  list-style-type: decimal;
 }
 
 .markdown-content li {
-  margin: 0;
-  padding: 0;
+  margin: 0.1em 0;
+  padding-left: 0.15em;
 }
 
 .markdown-content li > p {
   margin: 0;
 }
-
 .markdown-content li > ul,
 .markdown-content li > ol {
-  margin: 0;
+  margin: 0.1em 0;
 }
 
 .markdown-content code {
   background: var(--p-surface-100);
-  padding: 0.1em 0.3em;
-  border-radius: 3px;
+  color: #c7254e;
+  padding: 0.15em 0.4em;
+  border-radius: 4px;
   font-size: 0.875em;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 
 .app-dark .markdown-content code {
   background: var(--p-surface-700);
+  color: #f8b4b4;
 }
 
 .markdown-content pre {
