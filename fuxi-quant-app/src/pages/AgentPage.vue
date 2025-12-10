@@ -536,6 +536,9 @@ const toggleThinking = (index) => {
 }
 
 /* Markdown 内容样式 */
+.markdown-content p {
+  margin: 0.3em 0;
+}
 
 .markdown-content strong {
   font-weight: 600;
@@ -564,8 +567,9 @@ const toggleThinking = (index) => {
 
 .markdown-content ul,
 .markdown-content ol {
+  display: block;
   margin: 0.3em 0;
-  padding-left: 1.5em;
+  padding: 0 0 0 1.5em;
 }
 
 .markdown-content ul {
@@ -576,16 +580,26 @@ const toggleThinking = (index) => {
 }
 
 .markdown-content li {
-  margin: 0.1em 0;
-  padding-left: 0.15em;
+  display: list-item;
+  margin: 0;
+  padding: 0;
+  line-height: 1.6;
 }
 
-.markdown-content li > p {
-  margin: 0;
+.markdown-content li + li {
+  margin-top: 0.15em;
 }
+
+.markdown-content li > p,
+.markdown-content li > p:first-child,
+.markdown-content li > p:last-child {
+  margin: 0;
+  padding: 0;
+}
+
 .markdown-content li > ul,
 .markdown-content li > ol {
-  margin: 0.1em 0;
+  margin: 0.15em 0 0 0;
 }
 
 .markdown-content code {
