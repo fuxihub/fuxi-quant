@@ -28,12 +28,16 @@ const virtualizer = useVirtualizer(virtualizerOptions)
 const virtualRows = computed(() => virtualizer.value.getVirtualItems())
 const totalSize = computed(() => virtualizer.value.getTotalSize())
 
-// 监听消息变化，测量实际高度
+// 监听消息变化，测量实际高度并滚动
 watch(
   () => messages.value.length,
   () => {
     nextTick(() => {
       virtualizer.value.measure()
+      // 如果应该跟随底部，则滚动
+      if (shouldFollowBottom.value) {
+        scrollToBottom()
+      }
     })
   }
 )
@@ -68,11 +72,9 @@ const sendMessage = async () => {
     isTyping: true,
   })
 
-  // 滚动到底部
+  // 滚动到底部（watch 会在测量后自动滚动）
   shouldFollowBottom.value = true
   isAtBottom.value = true
-  await nextTick()
-  scrollToBottom()
 
   // 模拟 AI 回复
   isTyping.value = true
@@ -125,6 +127,11 @@ const renderLoop = () => {
 // ============ 滚动控制 ============
 const checkScroll = () => {
   if (!parentRef.value) return
+  // 如果正在跟随滚动，不更新 isAtBottom 避免按钮闪烁
+  if (shouldFollowBottom.value) {
+    isAtBottom.value = true
+    return
+  }
   const { scrollTop, scrollHeight, clientHeight } = parentRef.value
   const distanceFromBottom = scrollHeight - scrollTop - clientHeight
   isAtBottom.value = distanceFromBottom < 30
@@ -135,18 +142,17 @@ const handleWheel = () => {
 }
 
 const scrollToBottom = () => {
-  if (parentRef.value) {
-    parentRef.value.scrollTop = parentRef.value.scrollHeight
+  // 使用虚拟滚动的 scrollToIndex 确保正确定位
+  const lastIndex = messages.value.length - 1
+  if (lastIndex >= 0) {
+    virtualizer.value.scrollToIndex(lastIndex, { align: 'end' })
   }
 }
 
-const scrollToBottomSmooth = async () => {
-  await nextTick()
-  if (parentRef.value) {
-    parentRef.value.scrollTo({
-      top: parentRef.value.scrollHeight,
-      behavior: 'smooth',
-    })
+const scrollToBottomSmooth = () => {
+  const lastIndex = messages.value.length - 1
+  if (lastIndex >= 0) {
+    virtualizer.value.scrollToIndex(lastIndex, { align: 'end', behavior: 'smooth' })
   }
 }
 
@@ -224,7 +230,8 @@ const clearMessages = () => {
                   <!-- AI 消息 -->
                   <div
                     v-else
-                    class="max-w-[90%] whitespace-pre-wrap leading-relaxed break-words text-sm px-1 py-3 text-surface-900 dark:text-surface-50">
+                    class="max-w-[90%] whitespace-pre-wrap leading-relaxed break-words text-sm px-1 py-3 text-surface-900 dark:text-surface-50"
+                    :class="{ 'typing-text': messages[virtualRow.index]?.isTyping }">
                     {{ messages[virtualRow.index]?.content }}
                     <span
                       v-if="messages[virtualRow.index]?.isTyping"
@@ -291,11 +298,31 @@ const clearMessages = () => {
 </template>
 
 <style>
+/* 打字中的文字效果 */
+.typing-text {
+  background: linear-gradient(90deg, currentColor 0%, currentColor 85%, transparent 100%);
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-size: 100% 100%;
+  animation: typing-fade 0.3s ease-out;
+}
+
+@keyframes typing-fade {
+  from {
+    background-size: 95% 100%;
+  }
+  to {
+    background-size: 100% 100%;
+  }
+}
+
 /* 打字光标闪烁 */
 .typing-cursor {
   animation: blink 0.8s ease-in-out infinite;
   color: var(--p-primary-color);
   font-weight: bold;
+  -webkit-text-fill-color: var(--p-primary-color);
 }
 
 @keyframes blink {
