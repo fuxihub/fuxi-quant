@@ -1,4 +1,4 @@
-use anyhow::{Result, ensure};
+use anyhow::Result;
 use llama_cpp_2::{
     LogOptions,
     context::{LlamaContext, params::LlamaContextParams},
@@ -56,37 +56,24 @@ pub struct Qwen3Llama {
     backend: LlamaBackend,
     model: LlamaModel,
     ctx_params: LlamaContextParams,
+    n_ctx: u32,
 }
 
 impl Qwen3Llama {
-    /// 默认上下文长度（Qwen3-0.6B 最大支持 32768）
-    const DEFAULT_CTX: u32 = 32768;
     /// 默认 GPU 层数（999 = 全部放 GPU，Mac Metal 加速）
     const DEFAULT_GPU_LAYERS: u32 = 999;
 
-    /// 从 GGUF 文件加载模型（使用默认参数）
+    /// 从 GGUF 文件加载模型（使用模型默认配置，上下文使用模型支持的最大值）
     pub fn load(model_path: impl AsRef<Path>) -> Result<Self> {
-        Self::load_with_params(model_path, Self::DEFAULT_CTX, Self::DEFAULT_GPU_LAYERS)
-    }
-
-    /// 从 GGUF 文件加载模型（自定义参数）
-    ///
-    /// - `model_path`: GGUF 文件路径
-    /// - `n_ctx`: 上下文长度
-    /// - `n_gpu_layers`: GPU 层数（Mac/Metal 可设 999，CPU 可设 0）
-    pub fn load_with_params(
-        model_path: impl AsRef<Path>,
-        n_ctx: u32,
-        n_gpu_layers: u32,
-    ) -> Result<Self> {
-        ensure!(n_ctx > 0, "n_ctx must be > 0");
-
         // 禁用 llama.cpp 底层日志输出
         send_logs_to_tracing(LogOptions::default().with_logs_enabled(false));
 
         let backend = LlamaBackend::init()?;
-        let model_params = LlamaModelParams::default().with_n_gpu_layers(n_gpu_layers);
+        let model_params = LlamaModelParams::default().with_n_gpu_layers(Self::DEFAULT_GPU_LAYERS);
         let model = LlamaModel::load_from_file(&backend, model_path.as_ref(), &model_params)?;
+
+        // 从模型元数据读取最大上下文长度
+        let n_ctx = model.n_ctx_train();
 
         let ctx_params = LlamaContextParams::default()
             .with_n_ctx(NonZeroU32::new(n_ctx))
@@ -96,117 +83,28 @@ impl Qwen3Llama {
             backend,
             model,
             ctx_params,
+            n_ctx,
         })
     }
 
-    /// 生成回复（自动构造 ChatML 风格提示词，使用默认采样参数）
-    pub fn chat(&self, system: Option<&str>, user: &str, max_new_tokens: usize) -> Result<String> {
-        self.chat_with_params(system, user, max_new_tokens, SamplingParams::default())
-    }
-
-    /// 生成回复（自动构造 ChatML 风格提示词，指定采样参数）
-    pub fn chat_with_params(
-        &self,
-        system: Option<&str>,
-        user: &str,
-        max_new_tokens: usize,
-        params: SamplingParams,
-    ) -> Result<String> {
-        let prompt = Self::format_prompt(system, user);
-        self.generate(&prompt, max_new_tokens, params)
+    /// 获取上下文长度
+    pub fn n_ctx(&self) -> u32 {
+        self.n_ctx
     }
 
     /// 流式生成回复（每生成一个 token 调用回调）
-    pub fn chat_stream<F>(
-        &self,
-        system: Option<&str>,
-        user: &str,
-        max_new_tokens: usize,
-        on_token: F,
-    ) -> Result<String>
+    pub fn chat_stream<F>(&self, system: Option<&str>, user: &str, on_token: F) -> Result<String>
     where
         F: FnMut(&str),
     {
         let prompt = Self::format_prompt(system, user);
-        self.generate_stream(&prompt, max_new_tokens, SamplingParams::default(), on_token)
-    }
-
-    /// 使用已有 prompt 生成（带采样参数）
-    pub fn generate(
-        &self,
-        prompt: &str,
-        max_new_tokens: usize,
-        params: SamplingParams,
-    ) -> Result<String> {
-        let mut ctx: LlamaContext = self
-            .model
-            .new_context(&self.backend, self.ctx_params.clone())?;
-
-        // 编码提示词
-        let tokens = self
-            .model
-            .str_to_token(prompt, AddBos::Always)
-            .map_err(|e| anyhow::anyhow!(e))?;
-        let n_prompt = tokens.len();
-
-        // 分批处理 prompt tokens（每批最多 512 个）
-        const BATCH_SIZE: usize = 512;
-        let mut batch = LlamaBatch::new(BATCH_SIZE, 1);
-
-        for chunk_start in (0..n_prompt).step_by(BATCH_SIZE) {
-            batch.clear();
-            let chunk_end = (chunk_start + BATCH_SIZE).min(n_prompt);
-            for (i, &token) in tokens.iter().enumerate().take(chunk_end).skip(chunk_start) {
-                let is_last = i == n_prompt - 1;
-                batch.add(token, i as i32, &[0], is_last)?;
-            }
-            ctx.decode(&mut batch)?;
-        }
-
-        let eos = self.model.token_eos();
-        let mut output = String::new();
-        let mut n_cur = n_prompt;
-        let max_ctx = self.ctx_params.n_ctx().map(NonZeroU32::get).unwrap_or(0) as usize;
-
-        for _ in 0..max_new_tokens {
-            if max_ctx > 0 && n_cur >= max_ctx.saturating_sub(1) {
-                break;
-            }
-
-            // 温度采样（官方推荐，避免贪心导致重复）
-            let mut candidates =
-                LlamaTokenDataArray::from_iter(ctx.candidates_ith(batch.n_tokens() - 1), false);
-
-            // 使用随机 seed 进行采样，避免贪心导致的重复
-            // TODO: 后续可用 LlamaSampler 实现完整的 top_k/top_p/temp 采样链
-            let _ = params; // 暂时未用，保留接口兼容
-            let seed = (n_cur as u32).wrapping_mul(1103515245).wrapping_add(12345);
-            let next_token = candidates.sample_token(seed);
-
-            if next_token == eos {
-                break;
-            }
-
-            if let Ok(piece) = self.model.token_to_str(next_token, Special::Tokenize) {
-                output.push_str(&piece);
-            }
-
-            // 准备下一个 token 的批次
-            batch.clear();
-            batch.add(next_token, n_cur as i32, &[0], true)?;
-            n_cur += 1;
-
-            ctx.decode(&mut batch)?;
-        }
-
-        Ok(output)
+        self.generate_stream(&prompt, SamplingParams::default(), on_token)
     }
 
     /// 流式生成（每生成一个 token 调用回调）
     pub fn generate_stream<F>(
         &self,
         prompt: &str,
-        max_new_tokens: usize,
         params: SamplingParams,
         mut on_token: F,
     ) -> Result<String>
@@ -242,7 +140,7 @@ impl Qwen3Llama {
         let mut n_cur = n_prompt;
         let max_ctx = self.ctx_params.n_ctx().map(NonZeroU32::get).unwrap_or(0) as usize;
 
-        for _ in 0..max_new_tokens {
+        loop {
             if max_ctx > 0 && n_cur >= max_ctx.saturating_sub(1) {
                 break;
             }
@@ -314,32 +212,19 @@ impl Qwen3Llama {
         prompt
     }
 
-    /// 带工具调用的对话
-    pub fn chat_with_tools(
-        &self,
-        system: Option<&str>,
-        user: &str,
-        tools: &crate::tool::ToolRegistry,
-        max_new_tokens: usize,
-    ) -> Result<String> {
-        let prompt = Self::format_prompt_with_tools(system, user, tools);
-        self.generate(&prompt, max_new_tokens, SamplingParams::default())
-    }
-
     /// 带工具调用的流式对话
     pub fn chat_with_tools_stream<F>(
         &self,
         system: Option<&str>,
         user: &str,
         tools: &crate::tool::ToolRegistry,
-        max_new_tokens: usize,
         on_token: F,
     ) -> Result<String>
     where
         F: FnMut(&str),
     {
         let prompt = Self::format_prompt_with_tools(system, user, tools);
-        self.generate_stream(&prompt, max_new_tokens, SamplingParams::default(), on_token)
+        self.generate_stream(&prompt, SamplingParams::default(), on_token)
     }
 }
 
@@ -396,18 +281,8 @@ impl<'a> ChatSession<'a> {
         })
     }
 
-    /// 发送消息并获取回复
-    pub fn send(&mut self, user_msg: &str, max_new_tokens: usize) -> Result<String> {
-        self.send_stream(user_msg, max_new_tokens, |_| {})
-    }
-
     /// 流式发送消息（复用 KV Cache）
-    pub fn send_stream<F>(
-        &mut self,
-        user_msg: &str,
-        max_new_tokens: usize,
-        mut on_token: F,
-    ) -> Result<String>
+    pub fn send_stream<F>(&mut self, user_msg: &str, mut on_token: F) -> Result<String>
     where
         F: FnMut(&str),
     {
@@ -456,7 +331,7 @@ impl<'a> ChatSession<'a> {
             .map(NonZeroU32::get)
             .unwrap_or(0) as usize;
 
-        for _ in 0..max_new_tokens {
+        loop {
             if max_ctx > 0 && self.n_past >= max_ctx.saturating_sub(1) {
                 break;
             }
@@ -591,21 +466,6 @@ mod tests {
     }
 
     #[test]
-    fn test_chat() -> Result<()> {
-        let llama = Qwen3Llama::load(model_path())?;
-
-        let resp = llama.chat(
-            Some("你是一个量化高手"),
-            "帮我写一个python交易策略,写一个趋势交易的策略,要有风控",
-            32768,
-        )?;
-        println!("Response: {}", resp);
-
-        assert!(!resp.trim().is_empty());
-        Ok(())
-    }
-
-    #[test]
     fn test_chat_stream() -> Result<()> {
         let llama = Qwen3Llama::load(model_path())?;
 
@@ -613,7 +473,6 @@ mod tests {
         let resp = llama.chat_stream(
             Some("你是一个量化高手"),
             "帮我写一个python交易策略,写一个趋势交易的策略,要有风控",
-            32768,
             |token| {
                 print!("{}", token);
                 std::io::stdout().flush().ok();
@@ -634,7 +493,7 @@ mod tests {
 
         // 第一轮对话
         println!("=== 第一轮 ===");
-        let resp1 = session.send_stream("什么是均线策略?", 32768, |token| {
+        let resp1 = session.send_stream("什么是均线策略?", |token| {
             print!("{}", token);
             std::io::stdout().flush().ok();
         })?;
@@ -644,7 +503,7 @@ mod tests {
 
         // 第二轮对话（模型应该记住上下文）
         println!("=== 第二轮 ===");
-        let resp2 = session.send_stream("给我一个简单的代码示例", 32768, |token| {
+        let resp2 = session.send_stream("给我一个简单的代码示例", |token| {
             print!("{}", token);
             std::io::stdout().flush().ok();
         })?;
@@ -677,7 +536,6 @@ mod tests {
             - 帮我查一下特斯拉公司的股价.
             "#,
             &tools,
-            2048,
             |token| {
                 print!("{}", token);
                 std::io::stdout().flush().ok();
