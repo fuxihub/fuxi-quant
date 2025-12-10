@@ -7,7 +7,6 @@ import { resolveResource } from '@tauri-apps/api/path'
 // ============ 常量配置 ============
 const MAX_MESSAGES = 200 // 最大消息数量限制
 const TYPING_SPEED = { slow: 2, normal: 4, fast: 8 } // 打字速度（字符/帧）
-const MAX_TOKENS = 32768 // 最大生成 token 数
 const MODEL_NAME = 'resources/Qwen3-0.6B-Q8_0.gguf' // 模型资源路径
 
 // ============ 状态 ============
@@ -31,15 +30,6 @@ const loadModel = async () => {
   loadError.value = ''
 
   try {
-    // 检查模型是否已加载
-    const loaded = await invoke('is_model_loaded')
-    if (loaded) {
-      isModelLoaded.value = true
-      isLoadingModel.value = false
-      return
-    }
-
-    // 解析模型资源路径
     const modelPath = await resolveResource(MODEL_NAME)
     await invoke('load_model', { modelPath })
     isModelLoaded.value = true
@@ -153,11 +143,7 @@ const sendMessage = async () => {
   }
 
   try {
-    await invoke('chat', {
-      message: userQuery,
-      maxTokens: MAX_TOKENS,
-      channel,
-    })
+    await invoke('chat', { message: userQuery, channel })
   } catch (e) {
     console.error('调用失败:', e)
     pendingQueue.value += `\n[错误: ${e}]`
@@ -246,12 +232,11 @@ const handleKeydown = (e) => {
 }
 
 const clearMessages = async () => {
-  // 清空后端会话
   if (isModelLoaded.value) {
     try {
-      await invoke('clear_chat')
+      await invoke('reset_chat')
     } catch (e) {
-      console.error('清空会话失败:', e)
+      console.error('重置会话失败:', e)
     }
   }
   messages.value = [{ role: 'assistant', content: '你好！我是阿强，您的量化交易助手。有什么我可以帮你的吗？' }]
