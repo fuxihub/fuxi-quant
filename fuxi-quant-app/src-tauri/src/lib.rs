@@ -6,7 +6,6 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             agent::load_model,
-            agent::is_model_loaded,
             agent::chat,
             agent::reset_chat
         ])

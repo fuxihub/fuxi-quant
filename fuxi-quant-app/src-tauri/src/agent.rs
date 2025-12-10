@@ -55,12 +55,6 @@ pub async fn load_model(model_path: String) -> Result<String, String> {
     .map_err(|e| e.to_string())?
 }
 
-/// 检查模型是否已加载
-#[tauri::command]
-pub fn is_model_loaded() -> bool {
-    MODEL.get().is_some()
-}
-
 /// 发送消息（流式响应）
 #[tauri::command]
 pub async fn chat(message: String, channel: Channel<StreamEvent>) -> Result<(), String> {
