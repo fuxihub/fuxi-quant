@@ -1,96 +1,261 @@
-use anyhow::{Result, bail};
-use candle_core::{DType, Device, Tensor};
-use candle_nn::VarBuilder;
-use candle_transformers::generation::LogitsProcessor;
-use candle_transformers::models::qwen3::{Config, ModelForCausalLM};
-use hf_hub::Repo;
-use hf_hub::api::tokio::ApiBuilder;
-use std::io::Write;
-use std::path::{Path, PathBuf};
-use tokenizers::Tokenizer;
+use anyhow::{Result, ensure};
+use llama_cpp_2::{
+    context::{LlamaContext, params::LlamaContextParams},
+    llama_backend::LlamaBackend,
+    llama_batch::LlamaBatch,
+    model::{AddBos, LlamaModel, Special, params::LlamaModelParams},
+    token::data_array::LlamaTokenDataArray,
+};
+use std::{num::NonZeroU32, path::Path};
 
-const MARKER_FILE: &str = ".downloaded";
+/// 采样参数（官方推荐值）
+#[derive(Debug, Clone, Copy)]
+pub struct SamplingParams {
+    pub temperature: f32,
+    pub top_p: f32,
+    pub top_k: i32,
+    pub min_p: f32,
+    pub presence_penalty: f32,
+}
 
-pub async fn download_model(save_dir: impl AsRef<Path>, model_name: &str) -> Result<()> {
-    let save_dir = save_dir.as_ref();
-    std::fs::create_dir_all(save_dir)?;
+impl Default for SamplingParams {
+    /// 默认使用 Non-Thinking 模式参数
+    fn default() -> Self {
+        Self {
+            temperature: 0.7,
+            top_p: 0.8,
+            top_k: 20,
+            min_p: 0.0,
+            presence_penalty: 1.5,
+        }
+    }
+}
 
-    let api = ApiBuilder::new().with_progress(false).build()?;
-    let repo = api.repo(Repo::model(model_name.to_string()));
-    let info = repo.info().await?;
-
-    for sibling in &info.siblings {
-        let cached = repo.get(&sibling.rfilename).await?;
-        let target = save_dir.join(&sibling.rfilename);
-
-        if !target.exists() {
-            if let Some(parent) = target.parent() {
-                std::fs::create_dir_all(parent)?;
-            }
-            std::fs::copy(&cached, &target)?;
+impl SamplingParams {
+    /// Thinking 模式采样参数
+    pub fn thinking() -> Self {
+        Self {
+            temperature: 0.6,
+            top_p: 0.95,
+            top_k: 20,
+            min_p: 0.0,
+            presence_penalty: 1.5,
         }
     }
 
-    std::fs::write(save_dir.join(MARKER_FILE), "ok")?;
-    Ok(())
+    /// Non-Thinking 模式采样参数
+    pub fn non_thinking() -> Self {
+        Self::default()
+    }
 }
 
-pub fn get_model_file(model_dir: impl AsRef<Path>, filename: &str) -> Result<PathBuf> {
-    let model_dir = model_dir.as_ref();
+/// 简单的 Qwen3 GGUF 推理封装（基于 llama-cpp-2）
+pub struct Qwen3Llama {
+    backend: LlamaBackend,
+    model: LlamaModel,
+    ctx_params: LlamaContextParams,
+}
 
-    if !model_dir.join(MARKER_FILE).exists() {
-        bail!("Model not downloaded: {:?}", model_dir);
+impl Qwen3Llama {
+    /// 默认上下文长度（Qwen3-0.6B 最大支持 32768）
+    const DEFAULT_CTX: u32 = 32768;
+    /// 默认 GPU 层数（999 = 全部放 GPU，Mac Metal 加速）
+    const DEFAULT_GPU_LAYERS: u32 = 999;
+
+    /// 从 GGUF 文件加载模型（使用默认参数）
+    pub fn load(model_path: impl AsRef<Path>) -> Result<Self> {
+        Self::load_with_params(model_path, Self::DEFAULT_CTX, Self::DEFAULT_GPU_LAYERS)
     }
 
-    let path = model_dir.join(filename);
-    if !path.exists() {
-        bail!("File not found: {:?}", path);
-    }
+    /// 从 GGUF 文件加载模型（自定义参数）
+    ///
+    /// - `model_path`: GGUF 文件路径
+    /// - `n_ctx`: 上下文长度
+    /// - `n_gpu_layers`: GPU 层数（Mac/Metal 可设 999，CPU 可设 0）
+    pub fn load_with_params(
+        model_path: impl AsRef<Path>,
+        n_ctx: u32,
+        n_gpu_layers: u32,
+    ) -> Result<Self> {
+        ensure!(n_ctx > 0, "n_ctx must be > 0");
+        let backend = LlamaBackend::init()?;
+        let model_params = LlamaModelParams::default().with_n_gpu_layers(n_gpu_layers);
+        let model = LlamaModel::load_from_file(&backend, model_path.as_ref(), &model_params)?;
 
-    Ok(path)
-}
-
-/// 获取设备 (优先使用 Metal)
-fn get_device() -> Result<Device> {
-    Ok(Device::new_metal(0)?)
-}
-
-pub struct Qwen3Chat {
-    model: ModelForCausalLM,
-    tokenizer: Tokenizer,
-    device: Device,
-}
-
-impl Qwen3Chat {
-    /// 加载 Qwen3 模型
-    pub fn load(dir: impl AsRef<Path>) -> Result<Self> {
-        let dir = dir.as_ref();
-        let device = get_device()?;
-        let dtype = DType::BF16;
-
-        println!("Using device: {:?}", device);
-
-        let config: Config =
-            serde_json::from_str(&std::fs::read_to_string(dir.join("config.json"))?)?;
-
-        let tokenizer =
-            Tokenizer::from_file(dir.join("tokenizer.json")).map_err(|e| anyhow::anyhow!(e))?;
-
-        let vb = unsafe {
-            VarBuilder::from_mmaped_safetensors(&[dir.join("model.safetensors")], dtype, &device)?
-        };
-
-        let model = ModelForCausalLM::new(&config, vb)?;
+        let ctx_params = LlamaContextParams::default()
+            .with_n_ctx(NonZeroU32::new(n_ctx))
+            .with_n_batch(512);
 
         Ok(Self {
+            backend,
             model,
-            tokenizer,
-            device,
+            ctx_params,
         })
     }
 
-    /// 格式化对话为 ChatML 格式
-    pub fn format_prompt(&self, system: Option<&str>, user: &str) -> String {
+    /// 生成回复（自动构造 ChatML 风格提示词，使用默认采样参数）
+    pub fn chat(&self, system: Option<&str>, user: &str, max_new_tokens: usize) -> Result<String> {
+        self.chat_with_params(system, user, max_new_tokens, SamplingParams::default())
+    }
+
+    /// 生成回复（自动构造 ChatML 风格提示词，指定采样参数）
+    pub fn chat_with_params(
+        &self,
+        system: Option<&str>,
+        user: &str,
+        max_new_tokens: usize,
+        params: SamplingParams,
+    ) -> Result<String> {
+        let prompt = Self::format_prompt(system, user);
+        self.generate(&prompt, max_new_tokens, params)
+    }
+
+    /// 流式生成回复（每生成一个 token 调用回调）
+    pub fn chat_stream<F>(
+        &self,
+        system: Option<&str>,
+        user: &str,
+        max_new_tokens: usize,
+        on_token: F,
+    ) -> Result<String>
+    where
+        F: FnMut(&str),
+    {
+        let prompt = Self::format_prompt(system, user);
+        self.generate_stream(&prompt, max_new_tokens, SamplingParams::default(), on_token)
+    }
+
+    /// 使用已有 prompt 生成（带采样参数）
+    pub fn generate(
+        &self,
+        prompt: &str,
+        max_new_tokens: usize,
+        params: SamplingParams,
+    ) -> Result<String> {
+        let mut ctx: LlamaContext = self
+            .model
+            .new_context(&self.backend, self.ctx_params.clone())?;
+
+        // 编码提示词
+        let tokens = self
+            .model
+            .str_to_token(prompt, AddBos::Always)
+            .map_err(|e| anyhow::anyhow!(e))?;
+        let n_prompt = tokens.len();
+
+        let mut batch = LlamaBatch::new(512, 1);
+        for (i, token) in tokens.iter().enumerate() {
+            batch.add(*token, i as i32, &[0], i == n_prompt - 1)?;
+        }
+
+        // 先前向一次得到首个 logits
+        ctx.decode(&mut batch)?;
+
+        let eos = self.model.token_eos();
+        let mut output = String::new();
+        let mut n_cur = n_prompt;
+        let max_ctx = self.ctx_params.n_ctx().map(NonZeroU32::get).unwrap_or(0) as usize;
+
+        for _ in 0..max_new_tokens {
+            if max_ctx > 0 && n_cur >= max_ctx.saturating_sub(1) {
+                break;
+            }
+
+            // 温度采样（官方推荐，避免贪心导致重复）
+            let mut candidates =
+                LlamaTokenDataArray::from_iter(ctx.candidates_ith(batch.n_tokens() - 1), false);
+
+            // 使用随机 seed 进行采样，避免贪心导致的重复
+            // TODO: 后续可用 LlamaSampler 实现完整的 top_k/top_p/temp 采样链
+            let _ = params; // 暂时未用，保留接口兼容
+            let seed = (n_cur as u32).wrapping_mul(1103515245).wrapping_add(12345);
+            let next_token = candidates.sample_token(seed);
+
+            if next_token == eos {
+                break;
+            }
+
+            if let Ok(piece) = self.model.token_to_str(next_token, Special::Tokenize) {
+                output.push_str(&piece);
+            }
+
+            // 准备下一个 token 的批次
+            batch.clear();
+            batch.add(next_token, n_cur as i32, &[0], true)?;
+            n_cur += 1;
+
+            ctx.decode(&mut batch)?;
+        }
+
+        Ok(output)
+    }
+
+    /// 流式生成（每生成一个 token 调用回调）
+    pub fn generate_stream<F>(
+        &self,
+        prompt: &str,
+        max_new_tokens: usize,
+        params: SamplingParams,
+        mut on_token: F,
+    ) -> Result<String>
+    where
+        F: FnMut(&str),
+    {
+        let mut ctx: LlamaContext = self
+            .model
+            .new_context(&self.backend, self.ctx_params.clone())?;
+
+        let tokens = self
+            .model
+            .str_to_token(prompt, AddBos::Always)
+            .map_err(|e| anyhow::anyhow!(e))?;
+        let n_prompt = tokens.len();
+
+        let mut batch = LlamaBatch::new(512, 1);
+        for (i, token) in tokens.iter().enumerate() {
+            batch.add(*token, i as i32, &[0], i == n_prompt - 1)?;
+        }
+
+        ctx.decode(&mut batch)?;
+
+        let eos = self.model.token_eos();
+        let mut output = String::new();
+        let mut n_cur = n_prompt;
+        let max_ctx = self.ctx_params.n_ctx().map(NonZeroU32::get).unwrap_or(0) as usize;
+
+        for _ in 0..max_new_tokens {
+            if max_ctx > 0 && n_cur >= max_ctx.saturating_sub(1) {
+                break;
+            }
+
+            let mut candidates =
+                LlamaTokenDataArray::from_iter(ctx.candidates_ith(batch.n_tokens() - 1), false);
+
+            let _ = params;
+            let seed = (n_cur as u32).wrapping_mul(1103515245).wrapping_add(12345);
+            let next_token = candidates.sample_token(seed);
+
+            if next_token == eos {
+                break;
+            }
+
+            if let Ok(piece) = self.model.token_to_str(next_token, Special::Tokenize) {
+                on_token(&piece); // 流式回调
+                output.push_str(&piece);
+            }
+
+            batch.clear();
+            batch.add(next_token, n_cur as i32, &[0], true)?;
+            n_cur += 1;
+
+            ctx.decode(&mut batch)?;
+        }
+
+        Ok(output)
+    }
+
+    /// 简易 ChatML 模板
+    fn format_prompt(system: Option<&str>, user: &str) -> String {
         let mut prompt = String::new();
         if let Some(sys) = system {
             prompt.push_str("<|im_start|>system\n");
@@ -103,112 +268,55 @@ impl Qwen3Chat {
         prompt.push_str("<|im_start|>assistant\n");
         prompt
     }
-
-    /// 简单对话
-    pub fn chat(&mut self, user_input: &str, max_tokens: usize) -> Result<String> {
-        let prompt = self.format_prompt(None, user_input);
-        self.generate(&prompt, max_tokens)
-    }
-
-    /// 带系统提示的对话
-    pub fn chat_with_system(
-        &mut self,
-        system: &str,
-        user_input: &str,
-        max_tokens: usize,
-    ) -> Result<String> {
-        let prompt = self.format_prompt(Some(system), user_input);
-        self.generate(&prompt, max_tokens)
-    }
-
-    /// 生成回复
-    pub fn generate(&mut self, prompt: &str, max_tokens: usize) -> Result<String> {
-        let mut logits_processor = LogitsProcessor::new(42, Some(0.7), Some(0.9));
-
-        let encoding = self
-            .tokenizer
-            .encode(prompt, true)
-            .map_err(|e| anyhow::anyhow!(e))?;
-        let mut tokens: Vec<u32> = encoding.get_ids().to_vec();
-
-        let eos_token = self.tokenizer.token_to_id("<|im_end|>").unwrap_or(151645);
-
-        let mut output = String::new();
-        self.model.clear_kv_cache();
-
-        for index in 0..max_tokens {
-            let context_size = if index > 0 { 1 } else { tokens.len() };
-            let start_pos = tokens.len().saturating_sub(context_size);
-            let input_ids = &tokens[start_pos..];
-
-            let input = Tensor::new(input_ids, &self.device)?.unsqueeze(0)?;
-            let logits = self.model.forward(&input, start_pos)?;
-            let logits = logits.squeeze(0)?.squeeze(0)?.to_dtype(DType::F32)?;
-
-            let next_token = logits_processor.sample(&logits)?;
-            tokens.push(next_token);
-
-            if next_token == eos_token {
-                break;
-            }
-
-            if let Ok(text) = self.tokenizer.decode(&[next_token], false) {
-                output.push_str(&text);
-                print!("{}", text);
-                std::io::stdout().flush()?;
-            }
-        }
-
-        println!();
-        Ok(output)
-    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{Qwen3Chat, download_model};
+    use super::Qwen3Llama;
     use anyhow::Result;
+    use std::io::Write;
     use std::path::PathBuf;
 
-    fn get_model_dir() -> PathBuf {
-        let mut model_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        model_dir.pop();
-        model_dir.push(".cache");
-        model_dir.push("agent");
-        model_dir.push("models");
-        model_dir.push("Qwen3-0.6B");
-        model_dir
+    fn model_path() -> PathBuf {
+        let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        path.pop();
+        path.join("fuxi-quant-app")
+            .join("public")
+            .join("Qwen3-0.6B-Q8_0.gguf")
     }
 
-    #[tokio::test]
-    async fn test_download_model() -> Result<()> {
-        let model_dir = get_model_dir();
-        download_model(&model_dir, "Qwen/Qwen3-0.6B").await?;
-        assert!(model_dir.join("config.json").exists());
-        assert!(model_dir.join("model.safetensors").exists());
+    #[test]
+    fn test_chat() -> Result<()> {
+        let llama = Qwen3Llama::load(model_path())?;
+
+        let resp = llama.chat(
+            Some("你是一个量化高手"),
+            "帮我写一个python交易策略,写一个趋势交易的策略,要有风控",
+            32768,
+        )?;
+        println!("Response: {}", resp);
+
+        assert!(!resp.trim().is_empty());
         Ok(())
     }
 
     #[test]
-    fn test_qwen3_chat() -> Result<()> {
-        let model_dir = get_model_dir();
+    fn test_chat_stream() -> Result<()> {
+        let llama = Qwen3Llama::load(model_path())?;
 
-        if !model_dir.join("config.json").exists() {
-            println!("Model not downloaded, skipping test");
-            return Ok(());
-        }
-
-        println!("Loading model from {:?}", model_dir);
-        let mut chat = Qwen3Chat::load(&model_dir)?;
-
-        println!("\n--- Test: Simple chat ---");
-        let response = chat.chat(
-            "你好,我是你爹. 你管我叫祖宗, 元婴之下皆马喽. 正义审议爆你头, 措手不及徒手拼多多.",
-            1000,
+        println!("Streaming response:");
+        let resp = llama.chat_stream(
+            Some("你是一个量化高手"),
+            "帮我写一个python交易策略,写一个趋势交易的策略,要有风控",
+            32768,
+            |token| {
+                print!("{}", token);
+                std::io::stdout().flush().ok();
+            },
         )?;
-        println!("Response: {}", response);
-        assert!(!response.is_empty());
+        println!(); // 换行
 
+        assert!(!resp.trim().is_empty());
         Ok(())
     }
 }
