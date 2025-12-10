@@ -92,22 +92,17 @@ impl Qwen3Llama {
         self.n_ctx
     }
 
-    /// 流式生成回复（每生成一个 token 调用回调）
-    pub fn chat_stream<F>(&self, system: Option<&str>, user: &str, on_token: F) -> Result<String>
+    /// 流式对话（每生成一个 token 调用回调）
+    pub fn chat<F>(&self, system: Option<&str>, user: &str, on_token: F) -> Result<String>
     where
         F: FnMut(&str),
     {
         let prompt = Self::format_prompt(system, user);
-        self.generate_stream(&prompt, SamplingParams::default(), on_token)
+        self.generate(&prompt, SamplingParams::default(), on_token)
     }
 
-    /// 流式生成（每生成一个 token 调用回调）
-    pub fn generate_stream<F>(
-        &self,
-        prompt: &str,
-        params: SamplingParams,
-        mut on_token: F,
-    ) -> Result<String>
+    /// 流式生成（内部方法）
+    fn generate<F>(&self, prompt: &str, params: SamplingParams, mut on_token: F) -> Result<String>
     where
         F: FnMut(&str),
     {
@@ -213,7 +208,7 @@ impl Qwen3Llama {
     }
 
     /// 带工具调用的流式对话
-    pub fn chat_with_tools_stream<F>(
+    pub fn chat_with_tools<F>(
         &self,
         system: Option<&str>,
         user: &str,
@@ -224,7 +219,7 @@ impl Qwen3Llama {
         F: FnMut(&str),
     {
         let prompt = Self::format_prompt_with_tools(system, user, tools);
-        self.generate_stream(&prompt, SamplingParams::default(), on_token)
+        self.generate(&prompt, SamplingParams::default(), on_token)
     }
 }
 
