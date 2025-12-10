@@ -237,7 +237,9 @@ const handleScrollToBottom = () => {
 }
 
 const handleKeydown = (e) => {
-  if (e.key === 'Enter' && !e.shiftKey) {
+  // IME 输入时 keyCode 是 229，真正按 Enter 是 13
+  // 同时检查 e.key 和 e.keyCode 来区分 IME 确认和真正的发送
+  if (e.key === 'Enter' && e.keyCode === 13 && !e.shiftKey) {
     e.preventDefault()
     sendMessage()
   }
