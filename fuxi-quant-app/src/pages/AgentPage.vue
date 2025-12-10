@@ -11,6 +11,15 @@ onMounted(async () => {
     console.error('重置会话失败:', e)
   } finally {
     isReady.value = true
+    // 就绪后输入框获得焦点
+    nextTick(() => {
+      const el = inputRef.value?.$el
+      if (el) {
+        // PrimeVue Textarea 可能直接是 textarea 或包含 textarea
+        const textarea = el.tagName === 'TEXTAREA' ? el : el.querySelector('textarea')
+        textarea?.focus()
+      }
+    })
   }
 })
 
@@ -50,6 +59,7 @@ const isReceiving = ref(false)
 const isAtBottom = ref(true)
 const shouldFollowBottom = ref(true)
 const isReady = ref(false)
+const inputRef = ref(null)
 
 // ============ 虚拟滚动配置 ============
 const virtualizerOptions = computed(() => ({
@@ -106,6 +116,7 @@ const sendMessage = async () => {
     content: '',
     isTyping: true,
     thinkingCollapsed: false, // thinking 折叠状态
+    thinkingAutoCollapsed: false, // 是否已自动折叠过
     thinkingFollowBottom: true, // thinking 内容跟随底部
   })
 
@@ -162,9 +173,10 @@ const renderLoop = () => {
     const currentMsg = messages.value[messages.value.length - 1]
     currentMsg.content += chunk
 
-    // 检测 thinking 结束，立即折叠
-    if (!currentMsg.thinkingCollapsed && currentMsg.content.includes('</think>')) {
+    // 检测 thinking 结束，只自动折叠一次
+    if (!currentMsg.thinkingAutoCollapsed && currentMsg.content.includes('</think>')) {
       currentMsg.thinkingCollapsed = true
+      currentMsg.thinkingAutoCollapsed = true // 标记已自动折叠，不再重复
     }
 
     // thinking 内容跟随滚动
@@ -401,6 +413,7 @@ const toggleThinking = (index) => {
       <div class="max-w-[960px] mx-auto w-full">
         <div class="relative">
           <Textarea
+            ref="inputRef"
             v-model="inputContent"
             rows="1"
             autoResize
