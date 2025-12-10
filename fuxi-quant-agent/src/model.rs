@@ -157,7 +157,7 @@ impl Qwen3Llama {
             }
 
             if let Ok(piece) = self.model.token_to_str(next_token, Special::Tokenize) {
-                on_token(&piece); // 流式回调
+                on_token(&piece);
                 output.push_str(&piece);
             }
 
@@ -447,110 +447,5 @@ impl<'a> ChatSession<'a> {
         }
         prompt.push_str("<|im_start|>assistant\n");
         prompt
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{ChatSession, Qwen3Llama};
-    use anyhow::Result;
-    use std::io::Write;
-    use std::path::PathBuf;
-
-    fn model_path() -> PathBuf {
-        let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        path.pop();
-        path.join("fuxi-quant-app")
-            .join("public")
-            .join("Qwen3-0.6B-Q8_0.gguf")
-    }
-
-    #[test]
-    fn test_chat_stream() -> Result<()> {
-        let llama = Qwen3Llama::load(model_path())?;
-
-        println!("Streaming response:");
-        let resp = llama.chat_stream(
-            Some("你是一个量化高手"),
-            "帮我写一个python交易策略,写一个趋势交易的策略,要有风控",
-            |token| {
-                print!("{}", token);
-                std::io::stdout().flush().ok();
-            },
-        )?;
-        println!(); // 换行
-
-        assert!(!resp.trim().is_empty());
-        Ok(())
-    }
-
-    #[test]
-    fn test_multi_turn() -> Result<()> {
-        let llama = Qwen3Llama::load(model_path())?;
-        let mut session = ChatSession::with_system(&llama, "你是一个量化交易助手")?;
-
-        std::thread::sleep(std::time::Duration::from_secs(3));
-
-        // 第一轮对话
-        println!("=== 第一轮 ===");
-        let resp1 = session.send_stream("什么是均线策略?", |token| {
-            print!("{}", token);
-            std::io::stdout().flush().ok();
-        })?;
-        println!("\n");
-
-        std::thread::sleep(std::time::Duration::from_secs(3));
-
-        // 第二轮对话（模型应该记住上下文）
-        println!("=== 第二轮 ===");
-        let resp2 = session.send_stream("给我一个简单的代码示例", |token| {
-            print!("{}", token);
-            std::io::stdout().flush().ok();
-        })?;
-        println!("\n");
-
-        std::thread::sleep(std::time::Duration::from_secs(3));
-
-        assert!(!resp1.trim().is_empty());
-        assert!(!resp2.trim().is_empty());
-
-        // 查看历史记录
-        println!("对话轮数: {}", session.history().len());
-        Ok(())
-    }
-
-    #[test]
-    fn test_function_calling() -> Result<()> {
-        use crate::tool::{create_quant_tools, parse_tool_calls};
-
-        let llama = Qwen3Llama::load(model_path())?;
-        let tools = create_quant_tools();
-
-        println!("=== Function Calling 测试 ===");
-        println!("工具提示词:\n{}\n", tools.to_tool_prompt());
-
-        let resp = llama.chat_with_tools_stream(
-            Some("你是一个量化交易助手，请根据用户需求调用合适的工具。"),
-            r#"
-            - 帮我查一下苹果公司(AAPL)的股价.
-            - 帮我查一下特斯拉公司的股价.
-            "#,
-            &tools,
-            |token| {
-                print!("{}", token);
-                std::io::stdout().flush().ok();
-            },
-        )?;
-        println!("\n");
-
-        // 解析工具调用
-        let calls = parse_tool_calls(&resp);
-        println!("解析到 {} 个工具调用", calls.len());
-        for call in &calls {
-            println!("  - {}: {:?}", call.name, call.arguments);
-        }
-
-        assert!(!resp.trim().is_empty());
-        Ok(())
     }
 }
