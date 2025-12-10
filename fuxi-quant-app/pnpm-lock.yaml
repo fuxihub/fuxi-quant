@@ -11,6 +11,9 @@ importers:
       '@primeuix/themes':
         specifier: ^2.0.2
         version: 2.0.2
+      '@tanstack/vue-virtual':
+        specifier: ^3.13.13
+        version: 3.13.13(vue@3.5.25)
       '@tauri-apps/api':
         specifier: ^2
         version: 2.9.1
@@ -477,6 +480,14 @@ packages:
     resolution: {integrity: sha512-4+9w8ZHOiGnpcGI6z1TVVfWaX/koK7fKeSYF3qlYg2xpBtbteP2ddBxiarL+HVgfSJGeK5RIxRQmKm4rTJJAwA==}
     peerDependencies:
       vite: ^5.2.0 || ^6 || ^7
+
+  '@tanstack/virtual-core@3.13.13':
+    resolution: {integrity: sha512-uQFoSdKKf5S8k51W5t7b2qpfkyIbdHMzAn+AMQvHPxKUPeo1SsGaA4JRISQT87jm28b7z8OEqPcg1IOZagQHcA==}
+
+  '@tanstack/vue-virtual@3.13.13':
+    resolution: {integrity: sha512-Cf2xIEE8nWAfsX0N5nihkPYMeQRT+pHt4NEkuP8rNCn6lVnLDiV8rC8IeIxbKmQC0yPnj4SIBLwXYVf86xxKTQ==}
+    peerDependencies:
+      vue: ^2.7.0 || ^3.0.0
 
   '@tauri-apps/api@2.9.1':
     resolution: {integrity: sha512-IGlhP6EivjXHepbBic618GOmiWe4URJiIeZFlB7x3czM0yDHHYviH1Xvoiv4FefdkQtn6v7TuwWCRfOGdnVUGw==}
@@ -1173,6 +1184,13 @@ snapshots:
       '@tailwindcss/oxide': 4.1.17
       tailwindcss: 4.1.17
       vite: 6.4.1(jiti@2.6.1)(lightningcss@1.30.2)
+
+  '@tanstack/virtual-core@3.13.13': {}
+
+  '@tanstack/vue-virtual@3.13.13(vue@3.5.25)':
+    dependencies:
+      '@tanstack/virtual-core': 3.13.13
+      vue: 3.5.25
 
   '@tauri-apps/api@2.9.1': {}
 

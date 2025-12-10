@@ -1,23 +1,56 @@
 <script setup>
-import { ref, nextTick } from 'vue'
+import { ref, computed, nextTick, watch } from 'vue'
+import { useVirtualizer } from '@tanstack/vue-virtual'
 
+// ============ 常量配置 ============
+const MAX_MESSAGES = 200 // 最大消息数量限制
+const TYPING_SPEED = { slow: 2, normal: 4, fast: 8 } // 打字速度（字符/帧）
+
+// ============ 状态 ============
 const messages = ref([{ role: 'assistant', content: '你好！我是阿强，您的量化交易助手。有什么我可以帮你的吗？' }])
 const inputContent = ref('')
-const messagesContainer = ref(null)
+const parentRef = ref(null)
 const isTyping = ref(false)
 const pendingQueue = ref('')
 const isReceiving = ref(false)
 const isAtBottom = ref(true)
-const shouldFollowBottom = ref(true) // 是否应该跟随滚动到底部（用户主动触发时为 true）
+const shouldFollowBottom = ref(true)
 
+// ============ 虚拟滚动配置 ============
+const virtualizerOptions = computed(() => ({
+  count: messages.value.length,
+  getScrollElement: () => parentRef.value,
+  estimateSize: () => 60, // 预估每条消息高度
+  overscan: 5, // 预渲染额外行数
+}))
+
+const virtualizer = useVirtualizer(virtualizerOptions)
+const virtualRows = computed(() => virtualizer.value.getVirtualItems())
+const totalSize = computed(() => virtualizer.value.getTotalSize())
+
+// 监听消息变化，测量实际高度
+watch(
+  () => messages.value.length,
+  () => {
+    nextTick(() => {
+      virtualizer.value.measure()
+    })
+  }
+)
+
+// ============ 发送消息 ============
 const sendMessage = async () => {
   if (!inputContent.value.trim() || isTyping.value) return
 
-  // 1. 性能优化：在开始新一轮对话前，清理历史消息的 chunks，释放 DOM 压力
-  // 历史消息将回退到 v-html 渲染，不再持有大量 span 节点
+  // 清理历史消息的打字状态，释放内存
   messages.value.forEach((msg) => {
-    if (msg.chunks) msg.chunks = null
+    if (msg.isTyping) msg.isTyping = false
   })
+
+  // 限制消息数量
+  if (messages.value.length >= MAX_MESSAGES) {
+    messages.value = messages.value.slice(-MAX_MESSAGES + 2)
+  }
 
   // 添加用户消息
   messages.value.push({
@@ -28,113 +61,90 @@ const sendMessage = async () => {
   const userQuery = inputContent.value
   inputContent.value = ''
 
-  // 添加空的 AI 消息
-  const aiMsg = {
+  // 添加空的 AI 消息（打字中状态）
+  messages.value.push({
     role: 'assistant',
     content: '',
-    chunks: [],
-  }
-  messages.value.push(aiMsg)
+    isTyping: true,
+  })
 
-  // 发送消息时，强制开启跟随模式并滚动到底部
+  // 滚动到底部
   shouldFollowBottom.value = true
   isAtBottom.value = true
   await nextTick()
-  scrollToBottomInstant()
+  scrollToBottom()
 
   // 模拟 AI 回复
   isTyping.value = true
   isReceiving.value = true
-  const responseText = `收到你的消息: "${userQuery}"。\n目前我还在开发中，暂时无法处理复杂的量化指令。但为了演示快速渲染效果，这里有一段较长的文本：\n\n量化交易是指以先进的数学模型替代人为的主观判断，利用计算机技术从庞大的历史数据中海选能带来超额收益的多种“大概率”事件以制定策略，极大地减少了投资者情绪波动的影响，避免在市场极度狂热或悲观的情况下作出非理性的投资决策。`
+  const responseText = `收到你的消息: "${userQuery}"。\n目前我还在开发中，暂时无法处理复杂的量化指令。但为了演示快速渲染效果，这里有一段较长的文本：\n\n量化交易是指以先进的数学模型替代人为的主观判断，利用计算机技术从庞大的历史数据中海选能带来超额收益的多种"大概率"事件以制定策略，极大地减少了投资者情绪波动的影响，避免在市场极度狂热或悲观的情况下作出非理性的投资决策。`
 
   // 启动渲染循环
   requestAnimationFrame(renderLoop)
 
   // 模拟网络请求返回数据
-  // 这里模拟一次性返回大量数据，或者分段返回
   setTimeout(() => {
-    // 模拟数据到达，推入缓冲区
     pendingQueue.value += responseText
-
-    // 模拟数据传输结束
     isReceiving.value = false
   }, 500)
 }
 
-const renderLoop = async () => {
+// ============ 打字机渲染循环（优化版：按批次渲染） ============
+const renderLoop = () => {
   if (pendingQueue.value.length > 0) {
-    // 阶梯式线性速度策略，保证节奏平滑
+    // 根据积压量动态调整速度
     const backlog = pendingQueue.value.length
-    let consumeCount = 1
+    let speed = TYPING_SPEED.slow
+    if (backlog > 100) speed = TYPING_SPEED.fast
+    else if (backlog > 50) speed = TYPING_SPEED.normal
 
-    if (backlog > 100) consumeCount = 5
-    else if (backlog > 50) consumeCount = 3
-    else if (backlog > 20) consumeCount = 2
-
-    const chunk = pendingQueue.value.slice(0, consumeCount)
-    pendingQueue.value = pendingQueue.value.slice(consumeCount)
+    // 批量消费字符（不再逐字创建 DOM 节点）
+    const chunk = pendingQueue.value.slice(0, speed)
+    pendingQueue.value = pendingQueue.value.slice(speed)
 
     const currentMsg = messages.value[messages.value.length - 1]
-    const baseIndex = currentMsg.chunks.length
-    const newChunks = []
+    currentMsg.content += chunk
 
-    // 使用 index 遍历，以便生成稳定的 key
-    for (let i = 0; i < chunk.length; i++) {
-      const char = chunk[i]
-      newChunks.push({
-        type: char === '\n' ? 'br' : 'text',
-        value: char,
-        key: `${baseIndex + i}`,
-      })
-      currentMsg.content += char
-    }
-
-    // 批量更新 chunks，减少响应式触发频率
-    if (newChunks.length > 0) {
-      currentMsg.chunks.push(...newChunks)
-    }
-
-    // 只有在跟随模式下才自动滚动（使用 instant 避免卡顿）
+    // 跟随滚动
     if (shouldFollowBottom.value) {
-      scrollToBottomInstant()
+      scrollToBottom()
     }
   }
 
-  // 如果缓冲区还有数据，或者还在接收数据中，继续循环
+  // 继续循环或结束
   if (pendingQueue.value.length > 0 || isReceiving.value) {
     requestAnimationFrame(renderLoop)
   } else {
+    // 打字结束，立即清理状态
     isTyping.value = false
+    const currentMsg = messages.value[messages.value.length - 1]
+    if (currentMsg) currentMsg.isTyping = false
   }
 }
 
+// ============ 滚动控制 ============
 const checkScroll = () => {
-  if (!messagesContainer.value) return
-  const { scrollTop, scrollHeight, clientHeight } = messagesContainer.value
+  if (!parentRef.value) return
+  const { scrollTop, scrollHeight, clientHeight } = parentRef.value
   const distanceFromBottom = scrollHeight - scrollTop - clientHeight
-  // 阈值设为 30px
   isAtBottom.value = distanceFromBottom < 30
 }
 
-// 用户主动滚动（wheel 事件只有用户操作才触发，程序设置 scrollTop 不会触发）
 const handleWheel = () => {
-  // 用户滚动时立即关闭跟随模式
   shouldFollowBottom.value = false
 }
 
-// 立即滚动（用于 renderLoop，无动画避免卡顿）
-const scrollToBottomInstant = () => {
-  if (messagesContainer.value) {
-    messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight
+const scrollToBottom = () => {
+  if (parentRef.value) {
+    parentRef.value.scrollTop = parentRef.value.scrollHeight
   }
 }
 
-// 平滑滚动（用于用户点击按钮）
 const scrollToBottomSmooth = async () => {
   await nextTick()
-  if (messagesContainer.value) {
-    messagesContainer.value.scrollTo({
-      top: messagesContainer.value.scrollHeight,
+  if (parentRef.value) {
+    parentRef.value.scrollTo({
+      top: parentRef.value.scrollHeight,
       behavior: 'smooth',
     })
   }
@@ -151,6 +161,10 @@ const handleKeydown = (e) => {
     e.preventDefault()
     sendMessage()
   }
+}
+
+const clearMessages = () => {
+  messages.value = [{ role: 'assistant', content: '你好！我是阿强，您的量化交易助手。有什么我可以帮你的吗？' }]
 }
 </script>
 
@@ -170,55 +184,65 @@ const handleKeydown = (e) => {
         rounded
         severity="secondary"
         v-tooltip="'清空对话'"
-        @click="messages = []" />
+        @click="clearMessages" />
     </div>
 
-    <!-- 消息列表 -->
+    <!-- 消息列表（虚拟滚动） -->
     <div class="relative flex-1 overflow-hidden">
       <div
-        ref="messagesContainer"
-        class="absolute inset-0 overflow-y-auto p-4"
+        ref="parentRef"
+        class="absolute inset-0 overflow-y-auto"
         @scroll="checkScroll"
         @wheel="handleWheel">
-        <div class="max-w-[960px] mx-auto w-full flex flex-col gap-4">
-          <div
-            v-for="(msg, index) in messages"
-            :key="index"
-            class="flex w-full"
-            :class="{ 'justify-end': msg.role === 'user', 'justify-start': msg.role === 'assistant' }">
-            <!-- 消息气泡 -->
+        <!-- 虚拟滚动容器 -->
+        <div
+          class="relative w-full"
+          :style="{ height: `${totalSize}px` }">
+          <!-- 内容居中容器 -->
+          <div class="max-w-[960px] mx-auto px-4">
+            <!-- 虚拟化的消息项 -->
             <div
-              v-if="msg.role === 'user'"
-              class="whitespace-pre-wrap leading-relaxed break-words text-sm p-3 rounded-lg shadow-sm bg-surface-100 dark:bg-surface-700 text-surface-900 dark:text-surface-50">
-              {{ msg.content }}
-            </div>
-            <div
-              v-else
-              class="whitespace-pre-wrap leading-relaxed break-words text-sm px-1 py-3 text-surface-900 dark:text-surface-50">
-              <template v-if="msg.chunks">
-                <template
-                  v-for="chunk in msg.chunks"
-                  :key="chunk.key">
-                  <br v-if="chunk.type === 'br'" />
-                  <span
+              v-for="virtualRow in virtualRows"
+              :key="virtualRow.key"
+              :ref="(el) => virtualizer.measureElement(el)"
+              :data-index="virtualRow.index"
+              class="absolute left-0 right-0 py-2"
+              :style="{ transform: `translateY(${virtualRow.start}px)` }">
+              <div class="max-w-[960px] mx-auto px-4">
+                <div
+                  class="flex w-full"
+                  :class="{
+                    'justify-end': messages[virtualRow.index]?.role === 'user',
+                    'justify-start': messages[virtualRow.index]?.role === 'assistant',
+                  }">
+                  <!-- 用户消息 -->
+                  <div
+                    v-if="messages[virtualRow.index]?.role === 'user'"
+                    class="max-w-[80%] whitespace-pre-wrap leading-relaxed break-words text-sm p-3 rounded-lg shadow-sm bg-surface-100 dark:bg-surface-700 text-surface-900 dark:text-surface-50">
+                    {{ messages[virtualRow.index].content }}
+                  </div>
+                  <!-- AI 消息 -->
+                  <div
                     v-else
-                    class="typing-char">
-                    {{ chunk.value }}
-                  </span>
-                </template>
-              </template>
-              <span
-                v-else
-                v-html="msg.content"></span>
+                    class="max-w-[90%] whitespace-pre-wrap leading-relaxed break-words text-sm px-1 py-3 text-surface-900 dark:text-surface-50">
+                    {{ messages[virtualRow.index]?.content }}
+                    <span
+                      v-if="messages[virtualRow.index]?.isTyping"
+                      class="typing-cursor">
+                      |
+                    </span>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
-
-          <div
-            v-if="messages.length === 0"
-            class="flex-1 flex flex-col items-center justify-center text-surface-400">
-            <i class="pi pi-comments text-4xl mb-2"></i>
-            <p>开始对话吧</p>
-          </div>
+        </div>
+        <!-- 空状态 -->
+        <div
+          v-if="messages.length === 0"
+          class="absolute inset-0 flex flex-col items-center justify-center text-surface-400">
+          <i class="pi pi-comments text-4xl mb-2"></i>
+          <p>开始对话吧</p>
         </div>
       </div>
 
@@ -267,22 +291,21 @@ const handleKeydown = (e) => {
 </template>
 
 <style>
-.typing-char {
-  animation: fade-in 0.25s ease-out forwards;
-  opacity: 0;
-  display: inline-block;
+/* 打字光标闪烁 */
+.typing-cursor {
+  animation: blink 0.8s ease-in-out infinite;
+  color: var(--p-primary-color);
+  font-weight: bold;
 }
 
-@keyframes fade-in {
-  from {
-    opacity: 0;
-    transform: translateY(4px);
-    filter: blur(2px);
-  }
-  to {
+@keyframes blink {
+  0%,
+  50% {
     opacity: 1;
-    transform: translateY(0);
-    filter: blur(0);
+  }
+  51%,
+  100% {
+    opacity: 0;
   }
 }
 
