@@ -5,8 +5,8 @@ use llama_cpp_2::{
     llama_backend::LlamaBackend,
     llama_batch::LlamaBatch,
     model::{AddBos, LlamaModel, Special, params::LlamaModelParams},
+    sampling::LlamaSampler,
     send_logs_to_tracing,
-    token::data_array::LlamaTokenDataArray,
 };
 use std::{num::NonZeroU32, path::Path};
 
@@ -130,24 +130,28 @@ impl Qwen3Llama {
             ctx.decode(&mut batch)?;
         }
 
-        let eos = self.model.token_eos();
         let mut output = String::new();
         let mut n_cur = n_prompt;
         let max_ctx = self.ctx_params.n_ctx().map(NonZeroU32::get).unwrap_or(0) as usize;
+
+        // 在循环外创建采样器（不包含 seed）
+        let mut sampler = LlamaSampler::chain_simple([
+            LlamaSampler::top_k(params.top_k),
+            LlamaSampler::top_p(params.top_p, 1),
+            LlamaSampler::min_p(params.min_p, 1),
+            LlamaSampler::temp(params.temperature),
+            LlamaSampler::dist(n_cur as u32),
+        ]);
 
         loop {
             if max_ctx > 0 && n_cur >= max_ctx.saturating_sub(1) {
                 break;
             }
 
-            let mut candidates =
-                LlamaTokenDataArray::from_iter(ctx.candidates_ith(batch.n_tokens() - 1), false);
+            let next_token = sampler.sample(&ctx, batch.n_tokens() - 1);
+            sampler.accept(next_token);
 
-            let _ = params;
-            let seed = (n_cur as u32).wrapping_mul(1103515245).wrapping_add(12345);
-            let next_token = candidates.sample_token(seed);
-
-            if next_token == eos {
+            if self.model.is_eog_token(next_token) {
                 break;
             }
 
@@ -273,7 +277,6 @@ impl<'a> ChatSession<'a> {
         self.n_past += n_new;
 
         // 生成回复
-        let eos = self.llama.model.token_eos();
         let mut output = String::new();
         let max_ctx = self
             .llama
@@ -282,22 +285,25 @@ impl<'a> ChatSession<'a> {
             .map(NonZeroU32::get)
             .unwrap_or(0) as usize;
 
+        // 在循环外创建采样器
+        let params = SamplingParams::default();
+        let mut sampler = LlamaSampler::chain_simple([
+            LlamaSampler::top_k(params.top_k),
+            LlamaSampler::top_p(params.top_p, 1),
+            LlamaSampler::min_p(params.min_p, 1),
+            LlamaSampler::temp(params.temperature),
+            LlamaSampler::dist(self.n_past as u32),
+        ]);
+
         loop {
             if max_ctx > 0 && self.n_past >= max_ctx.saturating_sub(1) {
                 break;
             }
 
-            let mut candidates = LlamaTokenDataArray::from_iter(
-                self.ctx.candidates_ith(batch.n_tokens() - 1),
-                false,
-            );
+            let next_token = sampler.sample(&self.ctx, batch.n_tokens() - 1);
+            sampler.accept(next_token);
 
-            let seed = (self.n_past as u32)
-                .wrapping_mul(1103515245)
-                .wrapping_add(12345);
-            let next_token = candidates.sample_token(seed);
-
-            if next_token == eos {
+            if self.llama.model.is_eog_token(next_token) {
                 break;
             }
 
