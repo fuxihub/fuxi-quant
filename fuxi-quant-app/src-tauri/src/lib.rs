@@ -47,7 +47,7 @@ fn load_model(model_path: &str) -> Result<String, String> {
 
     // Safety: MODEL 是 'static，所以 session 也可以安全地保存
     let wrapper = ChatSessionWrapper {
-        inner: unsafe { std::mem::transmute(session) },
+        inner: unsafe { std::mem::transmute::<ChatSession<'_>, ChatSession<'static>>(session) },
     };
 
     SESSION.get_or_init(|| Mutex::new(Some(wrapper)));
