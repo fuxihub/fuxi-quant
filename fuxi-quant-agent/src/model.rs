@@ -223,88 +223,44 @@ impl Qwen3Llama {
     }
 }
 
-/// 对话消息
-#[derive(Debug, Clone)]
-pub struct Message {
-    pub role: Role,
-    pub content: String,
-}
-
-/// 消息角色
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Role {
-    System,
-    User,
-    Assistant,
-}
-
 /// 支持连续对话的会话（复用 KV Cache）
 pub struct ChatSession<'a> {
     llama: &'a Qwen3Llama,
     ctx: LlamaContext<'a>,
-    messages: Vec<Message>,
-    n_past: usize, // 已编码的 token 数量
+    system: Option<String>,
+    n_past: usize,
 }
 
 impl<'a> ChatSession<'a> {
-    /// 创建新会话
-    pub fn new(llama: &'a Qwen3Llama) -> Result<Self> {
+    /// 创建会话
+    pub fn new(llama: &'a Qwen3Llama, system: Option<&str>) -> Result<Self> {
         let ctx = llama
             .model
             .new_context(&llama.backend, llama.ctx_params.clone())?;
         Ok(Self {
             llama,
             ctx,
-            messages: Vec::new(),
+            system: system.map(String::from),
             n_past: 0,
         })
     }
 
-    /// 创建带系统提示的会话
-    pub fn with_system(llama: &'a Qwen3Llama, system: &str) -> Result<Self> {
-        let ctx = llama
-            .model
-            .new_context(&llama.backend, llama.ctx_params.clone())?;
-        Ok(Self {
-            llama,
-            ctx,
-            messages: vec![Message {
-                role: Role::System,
-                content: system.to_string(),
-            }],
-            n_past: 0,
-        })
-    }
-
-    /// 流式发送消息（复用 KV Cache）
-    pub fn send_stream<F>(&mut self, user_msg: &str, mut on_token: F) -> Result<String>
+    /// 发送消息（流式回调）
+    pub fn chat<F>(&mut self, user_msg: &str, mut on_token: F) -> Result<String>
     where
         F: FnMut(&str),
     {
-        // 添加用户消息
-        self.messages.push(Message {
-            role: Role::User,
-            content: user_msg.to_string(),
-        });
-
-        // 只编码新增部分
-        let new_prompt = self.build_incremental_prompt();
-        let new_tokens = self
+        let prompt = self.build_prompt(user_msg);
+        let add_bos = if self.n_past == 0 {
+            AddBos::Always
+        } else {
+            AddBos::Never
+        };
+        let tokens = self
             .llama
             .model
-            .str_to_token(&new_prompt, AddBos::Never)
+            .str_to_token(&prompt, add_bos)
             .map_err(|e| anyhow::anyhow!(e))?;
-
-        // 首轮需要 BOS
-        let tokens = if self.n_past == 0 {
-            self.llama
-                .model
-                .str_to_token(&new_prompt, AddBos::Always)
-                .map_err(|e| anyhow::anyhow!(e))?
-        } else {
-            new_tokens
-        };
-
         let n_new = tokens.len();
 
         // 编码新 tokens
@@ -357,89 +313,22 @@ impl<'a> ChatSession<'a> {
             self.ctx.decode(&mut batch)?;
         }
 
-        // 编码结束标记
-        let end_tokens = self
-            .llama
-            .model
-            .str_to_token("<|im_end|>\n", AddBos::Never)
-            .map_err(|e| anyhow::anyhow!(e))?;
-        batch.clear();
-        for (i, token) in end_tokens.iter().enumerate() {
-            batch.add(
-                *token,
-                (self.n_past + i) as i32,
-                &[0],
-                i == end_tokens.len() - 1,
-            )?;
-        }
-        self.ctx.decode(&mut batch)?;
-        self.n_past += end_tokens.len();
-
-        // 保存助手回复
-        self.messages.push(Message {
-            role: Role::Assistant,
-            content: output.clone(),
-        });
-
         Ok(output)
     }
 
-    /// 获取对话历史
-    pub fn history(&self) -> &[Message] {
-        &self.messages
-    }
-
-    /// 清空对话历史并重置 KV Cache
-    pub fn clear(&mut self) -> Result<()> {
-        self.messages.clear();
-        self.n_past = 0;
-        self.ctx = self
-            .llama
-            .model
-            .new_context(&self.llama.backend, self.llama.ctx_params.clone())?;
-        Ok(())
-    }
-
-    /// 构建增量 prompt（只返回最新一条用户消息部分）
-    fn build_incremental_prompt(&self) -> String {
-        // 如果是首次调用，返回完整 prompt
-        if self.n_past == 0 {
-            return self.build_full_prompt();
-        }
-
-        // 否则只返回新增的用户消息
+    /// 构建 prompt
+    fn build_prompt(&self, user_msg: &str) -> String {
         let mut prompt = String::new();
+        if self.n_past == 0
+            && let Some(sys) = &self.system
+        {
+            prompt.push_str("<|im_start|>system\n");
+            prompt.push_str(sys);
+            prompt.push_str("<|im_end|>\n");
+        }
         prompt.push_str("<|im_start|>user\n");
-        if let Some(msg) = self.messages.last() {
-            prompt.push_str(&msg.content);
-        }
+        prompt.push_str(user_msg);
         prompt.push_str("<|im_end|>\n");
-        prompt.push_str("<|im_start|>assistant\n");
-        prompt
-    }
-
-    /// 构建完整的 ChatML prompt
-    fn build_full_prompt(&self) -> String {
-        let mut prompt = String::new();
-        for msg in &self.messages {
-            match msg.role {
-                Role::System => {
-                    prompt.push_str("<|im_start|>system\n");
-                    prompt.push_str(&msg.content);
-                    prompt.push_str("<|im_end|>\n");
-                }
-                Role::User => {
-                    prompt.push_str("<|im_start|>user\n");
-                    prompt.push_str(&msg.content);
-                    prompt.push_str("<|im_end|>\n");
-                }
-                Role::Assistant => {
-                    prompt.push_str("<|im_start|>assistant\n");
-                    prompt.push_str(&msg.content);
-                    prompt.push_str("<|im_end|>\n");
-                }
-            }
-        }
         prompt.push_str("<|im_start|>assistant\n");
         prompt
     }
