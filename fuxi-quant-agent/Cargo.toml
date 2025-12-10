@@ -1,0 +1,23 @@
+[package]
+name = "fuxi-quant-agent"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license-file.workspace = true
+readme.workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+rmcp = { workspace = true }
+schemars = { workspace = true }
+
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+llama-cpp-2 = { workspace = true, default-features = false }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+llama-cpp-2 = { workspace = true, default-features = false, features = [
+    "metal",
+] }
