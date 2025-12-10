@@ -18,6 +18,28 @@ onMounted(async () => {
 const MAX_MESSAGES = 200
 const TYPING_SPEED = { slow: 2, normal: 4, fast: 8 }
 
+// ============ 解析 Thinking 内容 ============
+const parseThinking = (content) => {
+  if (!content) return { thinking: null, response: '', isThinkingComplete: false }
+
+  const thinkStart = content.indexOf('<think>')
+  if (thinkStart === -1) {
+    return { thinking: null, response: content, isThinkingComplete: false }
+  }
+
+  const thinkEnd = content.indexOf('</think>')
+  if (thinkEnd === -1) {
+    // thinking 还未结束
+    const thinkContent = content.slice(thinkStart + 7)
+    return { thinking: thinkContent, response: '', isThinkingComplete: false }
+  }
+
+  // thinking 已结束
+  const thinkContent = content.slice(thinkStart + 7, thinkEnd)
+  const response = content.slice(thinkEnd + 8).trim()
+  return { thinking: thinkContent, response, isThinkingComplete: true }
+}
+
 // ============ 状态 ============
 const messages = ref([])
 const inputContent = ref('')
@@ -83,6 +105,7 @@ const sendMessage = async () => {
     role: 'assistant',
     content: '',
     isTyping: true,
+    thinkingCollapsed: false, // thinking 折叠状态
   })
 
   // 滚动到底部（watch 会在测量后自动滚动）
@@ -138,6 +161,11 @@ const renderLoop = () => {
     const currentMsg = messages.value[messages.value.length - 1]
     currentMsg.content += chunk
 
+    // 检测 thinking 结束，立即折叠
+    if (!currentMsg.thinkingCollapsed && currentMsg.content.includes('</think>')) {
+      currentMsg.thinkingCollapsed = true
+    }
+
     // 跟随滚动
     if (shouldFollowBottom.value) {
       scrollToBottom()
@@ -151,7 +179,9 @@ const renderLoop = () => {
     // 打字结束，立即清理状态
     isTyping.value = false
     const currentMsg = messages.value[messages.value.length - 1]
-    if (currentMsg) currentMsg.isTyping = false
+    if (currentMsg) {
+      currentMsg.isTyping = false
+    }
   }
 }
 
@@ -269,9 +299,50 @@ const clearMessages = async () => {
                   <div
                     v-else
                     class="max-w-[90%] whitespace-pre-wrap leading-relaxed break-words text-sm px-1 py-3 text-surface-900 dark:text-surface-50">
-                    {{ messages[virtualRow.index]?.content }}
+                    <!-- Thinking 内容 -->
+                    <template v-if="parseThinking(messages[virtualRow.index]?.content).thinking !== null">
+                      <!-- 折叠的 thinking -->
+                      <div
+                        v-if="messages[virtualRow.index]?.thinkingCollapsed"
+                        class="thinking-collapsed flex items-center gap-1 text-surface-400 text-xs mb-2 cursor-pointer hover:text-surface-600 dark:hover:text-surface-300"
+                        @click="messages[virtualRow.index].thinkingCollapsed = false">
+                        <i class="pi pi-chevron-right text-xs"></i>
+                        <span>思考过程</span>
+                      </div>
+                      <!-- 展开的 thinking -->
+                      <div
+                        v-else
+                        class="thinking-expanded mb-3">
+                        <div
+                          class="flex items-center gap-1 text-surface-400 text-xs mb-1 cursor-pointer hover:text-surface-600 dark:hover:text-surface-300"
+                          @click="messages[virtualRow.index].thinkingCollapsed = true">
+                          <i class="pi pi-chevron-down text-xs transition-transform duration-200"></i>
+                          <span>思考过程</span>
+                          <span
+                            v-if="!parseThinking(messages[virtualRow.index]?.content).isThinkingComplete"
+                            class="typing-dots">
+                            ...
+                          </span>
+                        </div>
+                        <div
+                          class="thinking-content text-surface-400 dark:text-surface-500 text-xs pl-4 border-l-2 border-surface-200 dark:border-surface-700">
+                          {{ parseThinking(messages[virtualRow.index]?.content).thinking }}
+                        </div>
+                      </div>
+                      <!-- 正式回复 -->
+                      <div v-if="parseThinking(messages[virtualRow.index]?.content).response">
+                        {{ parseThinking(messages[virtualRow.index]?.content).response }}
+                      </div>
+                    </template>
+                    <!-- 无 thinking 的普通消息 -->
+                    <template v-else>
+                      {{ messages[virtualRow.index]?.content }}
+                    </template>
                     <span
-                      v-if="messages[virtualRow.index]?.isTyping"
+                      v-if="
+                        messages[virtualRow.index]?.isTyping &&
+                        !parseThinking(messages[virtualRow.index]?.content).thinking
+                      "
                       class="typing-dots">
                       ...
                     </span>
@@ -402,5 +473,12 @@ const clearMessages = async () => {
   to {
     transform: rotate(360deg);
   }
+}
+
+/* Thinking 内容样式 */
+.thinking-content {
+  max-height: 15em; /* 约 10 行 */
+  line-height: 1.5;
+  overflow-y: auto;
 }
 </style>
