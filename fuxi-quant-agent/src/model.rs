@@ -143,13 +143,19 @@ impl Qwen3Llama {
             .map_err(|e| anyhow::anyhow!(e))?;
         let n_prompt = tokens.len();
 
-        let mut batch = LlamaBatch::new(512, 1);
-        for (i, token) in tokens.iter().enumerate() {
-            batch.add(*token, i as i32, &[0], i == n_prompt - 1)?;
-        }
+        // 分批处理 prompt tokens（每批最多 512 个）
+        const BATCH_SIZE: usize = 512;
+        let mut batch = LlamaBatch::new(BATCH_SIZE, 1);
 
-        // 先前向一次得到首个 logits
-        ctx.decode(&mut batch)?;
+        for chunk_start in (0..n_prompt).step_by(BATCH_SIZE) {
+            batch.clear();
+            let chunk_end = (chunk_start + BATCH_SIZE).min(n_prompt);
+            for i in chunk_start..chunk_end {
+                let is_last = i == n_prompt - 1;
+                batch.add(tokens[i], i as i32, &[0], is_last)?;
+            }
+            ctx.decode(&mut batch)?;
+        }
 
         let eos = self.model.token_eos();
         let mut output = String::new();
@@ -211,12 +217,19 @@ impl Qwen3Llama {
             .map_err(|e| anyhow::anyhow!(e))?;
         let n_prompt = tokens.len();
 
-        let mut batch = LlamaBatch::new(512, 1);
-        for (i, token) in tokens.iter().enumerate() {
-            batch.add(*token, i as i32, &[0], i == n_prompt - 1)?;
-        }
+        // 分批处理 prompt tokens（每批最多 512 个）
+        const BATCH_SIZE: usize = 512;
+        let mut batch = LlamaBatch::new(BATCH_SIZE, 1);
 
-        ctx.decode(&mut batch)?;
+        for chunk_start in (0..n_prompt).step_by(BATCH_SIZE) {
+            batch.clear();
+            let chunk_end = (chunk_start + BATCH_SIZE).min(n_prompt);
+            for i in chunk_start..chunk_end {
+                let is_last = i == n_prompt - 1;
+                batch.add(tokens[i], i as i32, &[0], is_last)?;
+            }
+            ctx.decode(&mut batch)?;
+        }
 
         let eos = self.model.token_eos();
         let mut output = String::new();
@@ -267,6 +280,60 @@ impl Qwen3Llama {
         prompt.push_str("<|im_end|>\n");
         prompt.push_str("<|im_start|>assistant\n");
         prompt
+    }
+
+    /// 带工具的 ChatML 模板（Hermes-style tool use）
+    fn format_prompt_with_tools(
+        system: Option<&str>,
+        user: &str,
+        tools: &crate::tool::ToolRegistry,
+    ) -> String {
+        let mut prompt = String::new();
+
+        // System message with tools
+        prompt.push_str("<|im_start|>system\n");
+        if let Some(sys) = system {
+            prompt.push_str(sys);
+            prompt.push_str("\n\n");
+        }
+        prompt.push_str(&tools.to_tool_prompt());
+        prompt.push_str("<|im_end|>\n");
+
+        // User message
+        prompt.push_str("<|im_start|>user\n");
+        prompt.push_str(user);
+        prompt.push_str("<|im_end|>\n");
+
+        prompt.push_str("<|im_start|>assistant\n");
+        prompt
+    }
+
+    /// 带工具调用的对话
+    pub fn chat_with_tools(
+        &self,
+        system: Option<&str>,
+        user: &str,
+        tools: &crate::tool::ToolRegistry,
+        max_new_tokens: usize,
+    ) -> Result<String> {
+        let prompt = Self::format_prompt_with_tools(system, user, tools);
+        self.generate(&prompt, max_new_tokens, SamplingParams::default())
+    }
+
+    /// 带工具调用的流式对话
+    pub fn chat_with_tools_stream<F>(
+        &self,
+        system: Option<&str>,
+        user: &str,
+        tools: &crate::tool::ToolRegistry,
+        max_new_tokens: usize,
+        on_token: F,
+    ) -> Result<String>
+    where
+        F: FnMut(&str),
+    {
+        let prompt = Self::format_prompt_with_tools(system, user, tools);
+        self.generate_stream(&prompt, max_new_tokens, SamplingParams::default(), on_token)
     }
 }
 
@@ -584,6 +651,39 @@ mod tests {
 
         // 查看历史记录
         println!("对话轮数: {}", session.history().len());
+        Ok(())
+    }
+
+    #[test]
+    fn test_function_calling() -> Result<()> {
+        use crate::tool::{create_quant_tools, parse_tool_calls};
+
+        let llama = Qwen3Llama::load(model_path())?;
+        let tools = create_quant_tools();
+
+        println!("=== Function Calling 测试 ===");
+        println!("工具提示词:\n{}\n", tools.to_tool_prompt());
+
+        let resp = llama.chat_with_tools_stream(
+            Some("你是一个量化交易助手，请根据用户需求调用合适的工具。"),
+            "帮我查一下苹果公司(AAPL)的股价",
+            &tools,
+            2048,
+            |token| {
+                print!("{}", token);
+                std::io::stdout().flush().ok();
+            },
+        )?;
+        println!("\n");
+
+        // 解析工具调用
+        let calls = parse_tool_calls(&resp);
+        println!("解析到 {} 个工具调用", calls.len());
+        for call in &calls {
+            println!("  - {}: {:?}", call.name, call.arguments);
+        }
+
+        assert!(!resp.trim().is_empty());
         Ok(())
     }
 }
