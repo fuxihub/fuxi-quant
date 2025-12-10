@@ -666,7 +666,10 @@ mod tests {
 
         let resp = llama.chat_with_tools_stream(
             Some("你是一个量化交易助手，请根据用户需求调用合适的工具。"),
-            "帮我查一下苹果公司(AAPL)的股价",
+            r#"
+            - 帮我查一下苹果公司(AAPL)的股价.
+            - 帮我查一下特斯拉公司的股价.
+            "#,
             &tools,
             2048,
             |token| {
