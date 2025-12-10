@@ -82,21 +82,25 @@ pub async fn chat(message: String, channel: Channel<StreamEvent>) -> Result<(), 
     .map_err(|e| e.to_string())?
 }
 
-/// 重置会话
+/// 重置会话（异步）
 #[tauri::command]
-pub fn reset_chat() -> Result<(), String> {
-    let model = MODEL.get().ok_or("模型未加载")?;
+pub async fn reset_chat() -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let model = MODEL.get().ok_or("模型未加载")?;
 
-    let session = ChatSession::new(model, Some("你是阿强，一个专业的量化交易助手。"))
-        .map_err(|e| e.to_string())?;
+        let session = ChatSession::new(model, Some("你是阿强，一个专业的量化交易助手。"))
+            .map_err(|e| e.to_string())?;
 
-    let wrapper = ChatSessionWrapper {
-        inner: unsafe { std::mem::transmute::<ChatSession<'_>, ChatSession<'static>>(session) },
-    };
+        let wrapper = ChatSessionWrapper {
+            inner: unsafe { std::mem::transmute::<ChatSession<'_>, ChatSession<'static>>(session) },
+        };
 
-    let session_mutex = SESSION.get().ok_or("会话未初始化")?;
-    let mut guard = session_mutex.lock().map_err(|e| e.to_string())?;
-    *guard = Some(wrapper);
+        let session_mutex = SESSION.get().ok_or("会话未初始化")?;
+        let mut guard = session_mutex.lock().map_err(|e| e.to_string())?;
+        *guard = Some(wrapper);
 
-    Ok(())
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }

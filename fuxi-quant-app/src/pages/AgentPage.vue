@@ -1,7 +1,18 @@
 <script setup>
-import { ref, computed, nextTick, watch } from 'vue'
+import { ref, computed, nextTick, watch, onMounted } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { invoke, Channel } from '@tauri-apps/api/core'
+
+// 进入页面时重置会话，确保前后端同步
+onMounted(async () => {
+  try {
+    await invoke('reset_chat')
+  } catch (e) {
+    console.error('重置会话失败:', e)
+  } finally {
+    isReady.value = true
+  }
+})
 
 // ============ 常量配置 ============
 const MAX_MESSAGES = 200
@@ -16,6 +27,7 @@ const pendingQueue = ref('')
 const isReceiving = ref(false)
 const isAtBottom = ref(true)
 const shouldFollowBottom = ref(true)
+const isReady = ref(false)
 
 // ============ 虚拟滚动配置 ============
 const virtualizerOptions = computed(() => ({
@@ -306,7 +318,8 @@ const clearMessages = async () => {
             v-model="inputContent"
             rows="1"
             autoResize
-            placeholder="输入消息..."
+            :placeholder="isReady ? '输入消息...' : '初始化中...'"
+            :disabled="!isReady"
             class="w-full pr-12 max-h-32 !bg-surface-0 dark:!bg-surface-800"
             @keydown="handleKeydown" />
           <Button
@@ -315,7 +328,7 @@ const clearMessages = async () => {
             text
             class="!absolute !right-2 !bottom-2 !w-8 !h-8"
             @click="sendMessage"
-            :disabled="!inputContent.trim() || isTyping" />
+            :disabled="!isReady || !inputContent.trim() || isTyping" />
         </div>
       </div>
     </div>
