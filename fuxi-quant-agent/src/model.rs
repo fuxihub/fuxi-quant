@@ -285,92 +285,160 @@ pub enum Role {
     Assistant,
 }
 
-/// 支持连续对话的会话
+/// 支持连续对话的会话（复用 KV Cache）
 pub struct ChatSession<'a> {
     llama: &'a Qwen3Llama,
+    ctx: LlamaContext<'a>,
     messages: Vec<Message>,
+    n_past: usize, // 已编码的 token 数量
 }
 
 impl<'a> ChatSession<'a> {
     /// 创建新会话
-    pub fn new(llama: &'a Qwen3Llama) -> Self {
-        Self {
+    pub fn new(llama: &'a Qwen3Llama) -> Result<Self> {
+        let ctx = llama
+            .model
+            .new_context(&llama.backend, llama.ctx_params.clone())?;
+        Ok(Self {
             llama,
+            ctx,
             messages: Vec::new(),
-        }
+            n_past: 0,
+        })
     }
 
     /// 创建带系统提示的会话
-    pub fn with_system(llama: &'a Qwen3Llama, system: &str) -> Self {
-        Self {
+    pub fn with_system(llama: &'a Qwen3Llama, system: &str) -> Result<Self> {
+        let ctx = llama
+            .model
+            .new_context(&llama.backend, llama.ctx_params.clone())?;
+        Ok(Self {
             llama,
+            ctx,
             messages: vec![Message {
                 role: Role::System,
                 content: system.to_string(),
             }],
-        }
+            n_past: 0,
+        })
     }
 
     /// 发送消息并获取回复
     pub fn send(&mut self, user_msg: &str, max_new_tokens: usize) -> Result<String> {
-        self.send_with_params(user_msg, max_new_tokens, SamplingParams::default())
+        self.send_stream(user_msg, max_new_tokens, |_| {})
     }
 
-    /// 发送消息并获取回复（指定采样参数）
-    pub fn send_with_params(
+    /// 流式发送消息（复用 KV Cache）
+    pub fn send_stream<F>(
         &mut self,
         user_msg: &str,
         max_new_tokens: usize,
-        params: SamplingParams,
-    ) -> Result<String> {
+        mut on_token: F,
+    ) -> Result<String>
+    where
+        F: FnMut(&str),
+    {
         // 添加用户消息
         self.messages.push(Message {
             role: Role::User,
             content: user_msg.to_string(),
         });
 
-        // 构建完整 prompt
-        let prompt = self.build_prompt();
-        let response = self.llama.generate(&prompt, max_new_tokens, params)?;
+        // 只编码新增部分
+        let new_prompt = self.build_incremental_prompt();
+        let new_tokens = self
+            .llama
+            .model
+            .str_to_token(&new_prompt, AddBos::Never)
+            .map_err(|e| anyhow::anyhow!(e))?;
+
+        // 首轮需要 BOS
+        let tokens = if self.n_past == 0 {
+            self.llama
+                .model
+                .str_to_token(&new_prompt, AddBos::Always)
+                .map_err(|e| anyhow::anyhow!(e))?
+        } else {
+            new_tokens
+        };
+
+        let n_new = tokens.len();
+
+        // 编码新 tokens
+        let mut batch = LlamaBatch::new(512, 1);
+        for (i, token) in tokens.iter().enumerate() {
+            let pos = (self.n_past + i) as i32;
+            batch.add(*token, pos, &[0], i == n_new - 1)?;
+        }
+        self.ctx.decode(&mut batch)?;
+        self.n_past += n_new;
+
+        // 生成回复
+        let eos = self.llama.model.token_eos();
+        let mut output = String::new();
+        let max_ctx = self
+            .llama
+            .ctx_params
+            .n_ctx()
+            .map(NonZeroU32::get)
+            .unwrap_or(0) as usize;
+
+        for _ in 0..max_new_tokens {
+            if max_ctx > 0 && self.n_past >= max_ctx.saturating_sub(1) {
+                break;
+            }
+
+            let mut candidates = LlamaTokenDataArray::from_iter(
+                self.ctx.candidates_ith(batch.n_tokens() - 1),
+                false,
+            );
+
+            let seed = (self.n_past as u32)
+                .wrapping_mul(1103515245)
+                .wrapping_add(12345);
+            let next_token = candidates.sample_token(seed);
+
+            if next_token == eos {
+                break;
+            }
+
+            if let Ok(piece) = self.llama.model.token_to_str(next_token, Special::Tokenize) {
+                on_token(&piece);
+                output.push_str(&piece);
+            }
+
+            batch.clear();
+            batch.add(next_token, self.n_past as i32, &[0], true)?;
+            self.n_past += 1;
+
+            self.ctx.decode(&mut batch)?;
+        }
+
+        // 编码结束标记
+        let end_tokens = self
+            .llama
+            .model
+            .str_to_token("<|im_end|>\n", AddBos::Never)
+            .map_err(|e| anyhow::anyhow!(e))?;
+        batch.clear();
+        for (i, token) in end_tokens.iter().enumerate() {
+            batch.add(
+                *token,
+                (self.n_past + i) as i32,
+                &[0],
+                i == end_tokens.len() - 1,
+            )?;
+        }
+        self.ctx.decode(&mut batch)?;
+        self.n_past += end_tokens.len();
 
         // 保存助手回复
         self.messages.push(Message {
             role: Role::Assistant,
-            content: response.clone(),
+            content: output.clone(),
         });
 
-        Ok(response)
-    }
-
-    /// 流式发送消息
-    pub fn send_stream<F>(
-        &mut self,
-        user_msg: &str,
-        max_new_tokens: usize,
-        on_token: F,
-    ) -> Result<String>
-    where
-        F: FnMut(&str),
-    {
-        self.messages.push(Message {
-            role: Role::User,
-            content: user_msg.to_string(),
-        });
-
-        let prompt = self.build_prompt();
-        let response = self.llama.generate_stream(
-            &prompt,
-            max_new_tokens,
-            SamplingParams::default(),
-            on_token,
-        )?;
-
-        self.messages.push(Message {
-            role: Role::Assistant,
-            content: response.clone(),
-        });
-
-        Ok(response)
+        Ok(output)
     }
 
     /// 获取对话历史
@@ -378,13 +446,37 @@ impl<'a> ChatSession<'a> {
         &self.messages
     }
 
-    /// 清空对话历史
-    pub fn clear(&mut self) {
+    /// 清空对话历史并重置 KV Cache
+    pub fn clear(&mut self) -> Result<()> {
         self.messages.clear();
+        self.n_past = 0;
+        self.ctx = self
+            .llama
+            .model
+            .new_context(&self.llama.backend, self.llama.ctx_params.clone())?;
+        Ok(())
+    }
+
+    /// 构建增量 prompt（只返回最新一条用户消息部分）
+    fn build_incremental_prompt(&self) -> String {
+        // 如果是首次调用，返回完整 prompt
+        if self.n_past == 0 {
+            return self.build_full_prompt();
+        }
+
+        // 否则只返回新增的用户消息
+        let mut prompt = String::new();
+        prompt.push_str("<|im_start|>user\n");
+        if let Some(msg) = self.messages.last() {
+            prompt.push_str(&msg.content);
+        }
+        prompt.push_str("<|im_end|>\n");
+        prompt.push_str("<|im_start|>assistant\n");
+        prompt
     }
 
     /// 构建完整的 ChatML prompt
-    fn build_prompt(&self) -> String {
+    fn build_full_prompt(&self) -> String {
         let mut prompt = String::new();
         for msg in &self.messages {
             match msg.role {
@@ -463,23 +555,29 @@ mod tests {
     #[test]
     fn test_multi_turn() -> Result<()> {
         let llama = Qwen3Llama::load(model_path())?;
-        let mut session = ChatSession::with_system(&llama, "你是一个量化交易助手");
+        let mut session = ChatSession::with_system(&llama, "你是一个量化交易助手")?;
+
+        std::thread::sleep(std::time::Duration::from_secs(3));
 
         // 第一轮对话
         println!("=== 第一轮 ===");
-        let resp1 = session.send_stream("什么是均线策略?", 256, |token| {
+        let resp1 = session.send_stream("什么是均线策略?", 32768, |token| {
             print!("{}", token);
             std::io::stdout().flush().ok();
         })?;
         println!("\n");
 
+        std::thread::sleep(std::time::Duration::from_secs(3));
+
         // 第二轮对话（模型应该记住上下文）
         println!("=== 第二轮 ===");
-        let resp2 = session.send_stream("给我一个简单的代码示例", 256, |token| {
+        let resp2 = session.send_stream("给我一个简单的代码示例", 32768, |token| {
             print!("{}", token);
             std::io::stdout().flush().ok();
         })?;
         println!("\n");
+
+        std::thread::sleep(std::time::Duration::from_secs(3));
 
         assert!(!resp1.trim().is_empty());
         assert!(!resp2.trim().is_empty());
