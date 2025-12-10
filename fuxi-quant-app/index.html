@@ -22,7 +22,17 @@
         height: 48px;
         animation: spin 1.5s linear infinite;
       }
+      .loading-logo.fade-out {
+        animation: spin 1.5s linear infinite, fade-out 0.8s ease-out forwards;
+      }
       @keyframes spin { to { transform: rotate(360deg); } }
+      @keyframes fade-out {
+        to {
+          width: 80vmin;
+          height: 80vmin;
+          opacity: 0;
+        }
+      }
     </style>
   </head>
 

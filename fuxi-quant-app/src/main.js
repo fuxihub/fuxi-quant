@@ -31,4 +31,20 @@ app.use(PrimeVue, {
 app.directive('ripple', Ripple);
 app.directive('tooltip', Tooltip);
 
-app.mount("#app");
+// 延迟 3 秒后显示应用，带退出动画
+const startTime = Date.now();
+const MIN_LOADING_TIME = 3000;
+
+const showApp = () => {
+    const logo = document.querySelector('.loading-logo');
+    if (logo) {
+        logo.classList.add('fade-out');
+        setTimeout(() => app.mount("#app"), 800); // 与动画时长匹配
+    } else {
+        app.mount("#app");
+    }
+};
+
+const elapsed = Date.now() - startTime;
+const remaining = Math.max(0, MIN_LOADING_TIME - elapsed);
+setTimeout(showApp, remaining);
