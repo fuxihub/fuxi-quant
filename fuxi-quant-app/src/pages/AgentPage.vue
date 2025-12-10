@@ -7,7 +7,7 @@ import { resolveResource } from '@tauri-apps/api/path'
 // ============ 常量配置 ============
 const MAX_MESSAGES = 200 // 最大消息数量限制
 const TYPING_SPEED = { slow: 2, normal: 4, fast: 8 } // 打字速度（字符/帧）
-const MAX_TOKENS = 4096 // 最大生成 token 数
+const MAX_TOKENS = 32768 // 最大生成 token 数
 const MODEL_NAME = 'resources/Qwen3-0.6B-Q8_0.gguf' // 模型资源路径
 
 // ============ 状态 ============
