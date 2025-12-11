@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, nextTick, watch, onMounted, onUnmounted } from 'vue'
+import { ref, computed, nextTick, watch, onMounted } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { invoke, Channel } from '@tauri-apps/api/core'
 import { marked } from 'marked'
@@ -24,31 +24,13 @@ const renderMarkdown = (content) => {
   return marked.parse(content)
 }
 
-// ============ 会话管理 ============
-const sessionId = `session_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`
-
-const createSession = async () => {
-  try {
-    await invoke('create_session', { sessionId })
-    return true
-  } catch (e) {
-    console.error('创建会话失败:', e)
-    return false
-  }
-}
-
-const removeSession = async () => {
-  try {
-    await invoke('remove_session', { sessionId })
-  } catch (e) {
-    console.error('移除会话失败:', e)
-  }
-}
-
-// 进入页面时创建会话
+// 进入页面时清空上下文
 onMounted(async () => {
-  const success = await createSession()
-  if (success) {
+  try {
+    await invoke('clear_chat')
+  } catch (e) {
+    console.error('重置智能体上下文失败:', e)
+  } finally {
     isReady.value = true
     // 就绪后输入框获得焦点
     nextTick(() => {
@@ -59,11 +41,6 @@ onMounted(async () => {
       }
     })
   }
-})
-
-// 离开页面时移除会话
-onUnmounted(() => {
-  removeSession()
 })
 
 // ============ 常量配置 ============
@@ -203,7 +180,7 @@ const sendMessage = async () => {
   }
 
   try {
-    await invoke('chat', { sessionId, message: userQuery, channel })
+    await invoke('chat', { message: userQuery, channel })
   } catch (e) {
     console.error('调用失败:', e)
     pendingQueue.value += `\n[错误: ${e}]`
@@ -294,9 +271,12 @@ const handleKeydown = (e) => {
 }
 
 const clearMessages = async () => {
-  await removeSession()
   messages.value = []
-  await createSession()
+  try {
+    await invoke('clear_chat')
+  } catch (e) {
+    console.error('清空上下文失败:', e)
+  }
 }
 
 // 切换 thinking 折叠状态

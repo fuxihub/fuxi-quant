@@ -26,6 +26,7 @@ pub struct Agent {
     model: &'static Model,
     sys_prompt: Option<String>,
     ctx: LlamaContext<'static>,
+    ctx_len: u32,
     n_cur: usize,
     is_first_turn: bool,
 }
@@ -46,9 +47,22 @@ impl Agent {
             model,
             sys_prompt,
             ctx,
+            ctx_len: ctx_len.max(1),
             n_cur: 0,
             is_first_turn: true,
         })
+    }
+
+    pub fn reset(&mut self) -> Result<()> {
+        self.ctx = self.model.model.new_context(
+            &self.model.backend,
+            LlamaContextParams::default()
+                .with_n_ctx(NonZeroU32::new(self.ctx_len))
+                .with_n_batch(512),
+        )?;
+        self.n_cur = 0;
+        self.is_first_turn = true;
+        Ok(())
     }
 
     pub fn chat<F>(&mut self, message: &str, mut on_event: F) -> Result<()>
