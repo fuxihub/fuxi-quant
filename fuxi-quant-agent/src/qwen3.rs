@@ -1,4 +1,4 @@
-use crate::agent::Agent;
+use crate::agent::{Agent, StreamEvent};
 use crate::model::Model;
 use anyhow::Result;
 use llama_cpp_2::{
@@ -45,11 +45,11 @@ impl Agent for Qwen3Agent {
         Self::create(model, sys_prompt, ctx_len)
     }
 
-    fn chat<F>(&mut self, message: &str, mut on_token: F) -> Result<()>
+    fn chat<F>(&mut self, message: &str, mut on_event: F) -> Result<()>
     where
-        F: FnMut(&str),
+        F: FnMut(StreamEvent),
     {
-        on_token("<think>");
+        on_event(StreamEvent::ThinkBegin);
 
         // 构建 prompt
         let prompt = if self.is_first_turn {
@@ -118,11 +118,11 @@ impl Agent for Qwen3Agent {
             }
 
             if let Ok(piece) = self.model.model.token_to_str(next_token, Special::Tokenize) {
-                on_token(&piece);
                 if cfg!(debug_assertions) {
                     print!("{piece}");
                     let _ = std::io::stdout().flush();
                 }
+                on_event(StreamEvent::Token(piece));
             }
 
             batch.clear();

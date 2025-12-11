@@ -1648,6 +1648,7 @@ version = "1.0.0"
 dependencies = [
  "anyhow",
  "llama-cpp-2",
+ "serde",
 ]
 
 [[package]]

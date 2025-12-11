@@ -1,6 +1,6 @@
-use fuxi_quant_agent::Qwen3Agent;
 use fuxi_quant_agent::agent::Agent;
 use fuxi_quant_agent::model::Model;
+use fuxi_quant_agent::{Qwen3Agent, StreamEvent};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 use tauri::ipc::Channel;
@@ -23,15 +23,6 @@ fn model() -> Result<&'static Model, String> {
             unsafe { &*ptr }
         })
         .ok_or_else(|| "模型未加载".to_string())
-}
-
-/// 流式响应事件
-#[derive(Clone, serde::Serialize)]
-#[serde(tag = "type", content = "data")]
-pub enum StreamEvent {
-    Token(String),
-    Done(String),
-    Error(String),
 }
 
 /// 加载模型
@@ -81,15 +72,12 @@ pub async fn chat(
         let mut map = sessions().lock().map_err(|e| e.to_string())?;
         let agent = map.get_mut(&session_id).ok_or("会话不存在")?;
 
-        let result = agent.chat(&message, |token| {
-            let _ = channel.send(StreamEvent::Token(token.to_string()));
+        let result = agent.chat(&message, |event| {
+            let _ = channel.send(event);
         });
 
         match result {
-            Ok(()) => {
-                let _ = channel.send(StreamEvent::Done(String::new()));
-                Ok(())
-            }
+            Ok(()) => Ok(()),
             Err(e) => {
                 let _ = channel.send(StreamEvent::Error(e.to_string()));
                 Err(e.to_string())
