@@ -59,6 +59,11 @@ const shouldFollowBottom = ref(true)
 const isReady = ref(false)
 const inputRef = ref(null)
 
+// 滚动位置锁定（非跟随模式时保持位置稳定）
+const lockedScrollTop = ref(null)
+const isUserScrolling = ref(false)
+let scrollLockTimer = null
+
 // ============ 虚拟滚动配置 ============
 const virtualizerOptions = computed(() => ({
   count: messages.value.length,
@@ -84,6 +89,24 @@ watch(
     })
   }
 )
+
+// 监听当前消息内容变化（用于锁定滚动位置）
+const currentMsgContent = computed(() => {
+  const last = messages.value[messages.value.length - 1]
+  return last ? (last.content?.length || 0) + (last.thinkingContent?.length || 0) : 0
+})
+
+watch(currentMsgContent, () => {
+  // 非跟随模式时，保持滚动位置稳定
+  if (!shouldFollowBottom.value && parentRef.value && lockedScrollTop.value !== null) {
+    // 使用 requestAnimationFrame 确保在 DOM 更新后恢复位置
+    requestAnimationFrame(() => {
+      if (parentRef.value && lockedScrollTop.value !== null) {
+        parentRef.value.scrollTop = lockedScrollTop.value
+      }
+    })
+  }
+})
 
 // ============ 发送消息 ============
 const sendMessage = async () => {
@@ -151,9 +174,9 @@ const sendMessage = async () => {
       if (currentMsg.isThinking) {
         // 思考中的内容
         currentMsg.thinkingContent += event.data
-        // 若保持底部，思考过程也跟随到底
+        // 若保持底部，思考过程也跟随到底（使用 instant 避免动画堆积）
         if (shouldFollowBottom.value) {
-          scrollToBottom()
+          scrollToBottom(false)
         }
       } else {
         // 正式回复内容，添加到队列
@@ -195,9 +218,9 @@ const renderLoop = () => {
     const currentMsg = messages.value[messages.value.length - 1]
     currentMsg.content += chunk
 
-    // 跟随滚动
+    // 跟随滚动（使用 instant 避免动画堆积）
     if (shouldFollowBottom.value) {
-      scrollToBottom(true)
+      scrollToBottom(false)
     }
   }
 
@@ -211,6 +234,10 @@ const renderLoop = () => {
     if (currentMsg) {
       currentMsg.isTyping = false
     }
+    // 打字结束后平滑滚动到底部
+    if (shouldFollowBottom.value) {
+      scrollToBottom(true)
+    }
   }
 }
 
@@ -220,19 +247,43 @@ const checkScroll = () => {
   const { scrollTop, scrollHeight, clientHeight } = parentRef.value
   const distanceFromBottom = scrollHeight - scrollTop - clientHeight
   isAtBottom.value = distanceFromBottom < 30
-  // 只要不在底部，则关闭自动跟随，避免需要多次滚动
-  if (!isAtBottom.value) {
-    shouldFollowBottom.value = false
+
+  // 更新锁定位置（仅在非跟随模式且用户未主动滚动时）
+  if (!shouldFollowBottom.value && !isUserScrolling.value) {
+    lockedScrollTop.value = scrollTop
   }
 }
 
 const handleWheel = (e) => {
-  // 任何滚轮操作都视为用户接管，关闭自动跟随，避免输出时被拉回
-  shouldFollowBottom.value = false
-  isAtBottom.value = false
+  // 检测滚动方向
+  const isScrollingUp = e.deltaY < 0
+
+  // 向上滚动时脱离跟随模式
+  if (isScrollingUp && shouldFollowBottom.value) {
+    shouldFollowBottom.value = false
+    isAtBottom.value = false
+  }
+
+  // 标记用户正在滚动
+  isUserScrolling.value = true
+
+  // 记录当前滚动位置用于锁定
+  if (parentRef.value) {
+    // 延迟更新锁定位置，等滚动稳定后
+    clearTimeout(scrollLockTimer)
+    scrollLockTimer = setTimeout(() => {
+      if (parentRef.value && !shouldFollowBottom.value) {
+        lockedScrollTop.value = parentRef.value.scrollTop
+      }
+      isUserScrolling.value = false
+    }, 150)
+  }
 }
 
 const scrollToBottom = (smooth = false) => {
+  // 清除锁定位置
+  lockedScrollTop.value = null
+
   // 使用虚拟滚动的 scrollToIndex 确保正确定位
   const lastIndex = messages.value.length - 1
   if (lastIndex >= 0) {
@@ -253,6 +304,8 @@ const scrollToBottomSmooth = () => {
 const handleScrollToBottom = () => {
   shouldFollowBottom.value = true
   isAtBottom.value = true
+  lockedScrollTop.value = null
+  isUserScrolling.value = false
   scrollToBottomSmooth()
 }
 
@@ -306,9 +359,9 @@ const toggleThinking = (index) => {
     <div class="relative flex-1 overflow-hidden">
       <div
         ref="parentRef"
-        class="absolute inset-0 overflow-y-auto"
+        class="absolute inset-0 overflow-y-auto scroll-container"
         @scroll="checkScroll"
-        @wheel="handleWheel">
+        @wheel.passive="handleWheel">
         <!-- 虚拟滚动容器 -->
         <div
           class="relative w-full"
@@ -443,6 +496,11 @@ const toggleThinking = (index) => {
 </template>
 
 <style>
+/* 滚动容器样式 - 禁用浏览器默认锚定，手动控制 */
+.scroll-container {
+  overflow-anchor: none;
+}
+
 /* 打字中的省略号动画 */
 .typing-dots {
   display: inline-block;
