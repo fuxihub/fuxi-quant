@@ -45,7 +45,7 @@ onMounted(async () => {
 
 // ============ 常量配置 ============
 const MAX_MESSAGES = 200
-const TYPING_SPEED = { slow: 2, normal: 4, fast: 8 }
+const TYPING_SPEED = { slow: 4, normal: 12, fast: 32, instant: 999 }
 
 // ============ 状态 ============
 const messages = ref([])
@@ -210,25 +210,30 @@ const sendMessage = async () => {
   }
 }
 
-// ============ 打字机渲染循环（优化版：按批次渲染） ============
+// ============ 打字机渲染循环（优化版：根据积压量动态调整速度） ============
 const renderLoop = () => {
   if (pendingQueue.value.length > 0) {
-    // 根据积压量动态调整速度
+    // 根据积压量动态调整速度（积压越多越快）
     const backlog = pendingQueue.value.length
     let speed = TYPING_SPEED.slow
-    if (backlog > 100) speed = TYPING_SPEED.fast
-    else if (backlog > 50) speed = TYPING_SPEED.normal
+    if (backlog > 200) speed = TYPING_SPEED.instant
+    else if (backlog > 100) speed = TYPING_SPEED.fast
+    else if (backlog > 30) speed = TYPING_SPEED.normal
 
-    // 批量消费字符（不再逐字创建 DOM 节点）
+    // 批量消费字符
     const chunk = pendingQueue.value.slice(0, speed)
     pendingQueue.value = pendingQueue.value.slice(speed)
 
     const currentMsg = messages.value[messages.value.length - 1]
     currentMsg.content += chunk
 
-    // 跟随滚动（使用 instant 避免动画堆积）
+    // 跟随滚动（节流避免频繁滚动）
     if (shouldFollowBottom.value) {
-      scrollToBottom(false)
+      const now = Date.now()
+      if (now - lastScrollTime > SCROLL_THROTTLE) {
+        lastScrollTime = now
+        scrollToBottom(false)
+      }
     }
   }
 
@@ -242,9 +247,9 @@ const renderLoop = () => {
     if (currentMsg) {
       currentMsg.isTyping = false
     }
-    // 打字结束后平滑滚动到底部
+    // 打字结束后滚动到底部
     if (shouldFollowBottom.value) {
-      scrollToBottom(true)
+      scrollToBottom(false)
     }
   }
 }
