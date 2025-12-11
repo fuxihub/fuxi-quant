@@ -26,9 +26,12 @@ impl Agent for Qwen3Agent {
     where
         F: FnMut(&str),
     {
+        let mut output = String::new();
+        output.push_str("<think>");
+
         let mut prompt = String::new();
         if let Some(sys) = &self.sys_prompt {
-            prompt.push_str("<|im_start|>system\n");
+            prompt.push_str("1system\n");
             prompt.push_str(sys);
             prompt.push_str("<|im_end|>\n");
         }
@@ -64,7 +67,6 @@ impl Agent for Qwen3Agent {
             ctx.decode(&mut batch)?;
         }
 
-        let mut output = String::new();
         let mut n_cur = n_prompt;
         let max_ctx = self.ctx_len.map(NonZeroU32::get).unwrap_or(0) as usize;
 
