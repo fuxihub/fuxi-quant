@@ -5,7 +5,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
-            agent::load_model,
+            agent::init_agent,
             agent::create_session,
             agent::chat,
             agent::remove_session

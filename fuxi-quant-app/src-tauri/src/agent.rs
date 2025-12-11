@@ -1,6 +1,5 @@
-use fuxi_quant_agent::agent::Agent;
+use fuxi_quant_agent::agent::{Agent, StreamEvent};
 use fuxi_quant_agent::model::Model;
-use fuxi_quant_agent::{Qwen3Agent, StreamEvent};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 use tauri::ipc::Channel;
@@ -9,9 +8,9 @@ use tauri::ipc::Channel;
 static MODEL: OnceLock<Arc<Model>> = OnceLock::new();
 
 /// 全局会话 Map
-static SESSIONS: OnceLock<Mutex<HashMap<String, Qwen3Agent>>> = OnceLock::new();
+static SESSIONS: OnceLock<Mutex<HashMap<String, Agent>>> = OnceLock::new();
 
-fn sessions() -> &'static Mutex<HashMap<String, Qwen3Agent>> {
+fn sessions() -> &'static Mutex<HashMap<String, Agent>> {
     SESSIONS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
@@ -22,20 +21,20 @@ fn model() -> Result<&'static Model, String> {
             let ptr = Arc::as_ptr(m);
             unsafe { &*ptr }
         })
-        .ok_or_else(|| "模型未加载".to_string())
+        .ok_or_else(|| "智能体未初始化".to_string())
 }
 
-/// 加载模型
+/// 初始化智能体
 #[tauri::command]
-pub async fn load_model(model_path: String) -> Result<String, String> {
+pub async fn init_agent(model_path: String) -> Result<String, String> {
     if MODEL.get().is_some() {
-        return Ok("模型已加载".into());
+        return Ok("智能体已初始化".into());
     }
 
     tauri::async_runtime::spawn_blocking(move || {
         let model = Model::load(&model_path).map_err(|e| e.to_string())?;
-        MODEL.set(model).map_err(|_| "模型已被加载")?;
-        Ok("模型加载成功".into())
+        MODEL.set(model).map_err(|_| "智能体已被初始化")?;
+        Ok("智能体初始化成功".into())
     })
     .await
     .map_err(|e| e.to_string())?
@@ -50,8 +49,8 @@ pub async fn create_session(
 ) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
         let model = model()?;
-        let agent = Qwen3Agent::create(model, sys_prompt, ctx_len.unwrap_or(8192))
-            .map_err(|e| e.to_string())?;
+        let agent =
+            Agent::new(model, sys_prompt, ctx_len.unwrap_or(8192)).map_err(|e| e.to_string())?;
 
         let mut map = sessions().lock().map_err(|e| e.to_string())?;
         map.insert(session_id, agent);
