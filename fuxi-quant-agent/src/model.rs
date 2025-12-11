@@ -151,35 +151,14 @@ pub struct SamplingConfig {
 /// 采样参数
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct SamplingParams {
-    #[serde(default = "default_temperature")]
     pub temperature: f32,
-    #[serde(default)]
     pub min_p: f32,
-    #[serde(default = "default_top_p")]
     pub top_p: f32,
-    #[serde(default = "default_top_k")]
     pub top_k: i32,
-}
-
-fn default_temperature() -> f32 {
-    0.6
-}
-fn default_top_p() -> f32 {
-    0.95
-}
-fn default_top_k() -> i32 {
-    20
-}
-
-impl Default for SamplingParams {
-    fn default() -> Self {
-        Self {
-            temperature: 0.6,
-            min_p: 0.0,
-            top_p: 0.95,
-            top_k: 20,
-        }
-    }
+    /// presence_penalty: 0.0 to 2.0, 用于减少重复
+    /// llama.cpp 默认关闭，设置 1.0 可减少重复
+    #[serde(default)]
+    pub presence_penalty: f32,
 }
 
 // ============================================================================
@@ -382,13 +361,22 @@ impl AgentModel {
         let max_ctx = self.ctx_params.n_ctx().map(NonZeroU32::get).unwrap_or(0) as usize;
 
         // 在循环外创建采样器
-        let mut sampler = LlamaSampler::chain_simple([
-            LlamaSampler::top_k(params.top_k),
-            LlamaSampler::top_p(params.top_p, 1),
-            LlamaSampler::min_p(params.min_p, 1),
-            LlamaSampler::temp(params.temperature),
-            LlamaSampler::dist(n_cur as u32),
-        ]);
+        // llama.cpp 官方默认顺序: penalties → top_k → top_p → min_p → temp → dist
+        let mut samplers: Vec<LlamaSampler> = vec![];
+        if params.presence_penalty > 0.0 {
+            samplers.push(LlamaSampler::penalties(
+                64,
+                1.0,
+                0.0,
+                params.presence_penalty,
+            ));
+        }
+        samplers.push(LlamaSampler::top_k(params.top_k));
+        samplers.push(LlamaSampler::top_p(params.top_p, 1));
+        samplers.push(LlamaSampler::min_p(params.min_p, 1));
+        samplers.push(LlamaSampler::temp(params.temperature));
+        samplers.push(LlamaSampler::dist(n_cur as u32));
+        let mut sampler = LlamaSampler::chain_simple(samplers);
 
         loop {
             if max_ctx > 0 && n_cur >= max_ctx.saturating_sub(1) {
@@ -537,14 +525,23 @@ impl<'a> ChatSession<'a> {
             .unwrap_or(0) as usize;
 
         // 在循环外创建采样器（根据模型配置和模式）
+        // llama.cpp 官方默认顺序: penalties → top_k → top_p → min_p → temp → dist
         let params = self.agent.sampling_params(mode);
-        let mut sampler = LlamaSampler::chain_simple([
-            LlamaSampler::top_k(params.top_k),
-            LlamaSampler::top_p(params.top_p, 1),
-            LlamaSampler::min_p(params.min_p, 1),
-            LlamaSampler::temp(params.temperature),
-            LlamaSampler::dist(self.n_past as u32),
-        ]);
+        let mut samplers: Vec<LlamaSampler> = vec![];
+        if params.presence_penalty > 0.0 {
+            samplers.push(LlamaSampler::penalties(
+                64,
+                1.0,
+                0.0,
+                params.presence_penalty,
+            ));
+        }
+        samplers.push(LlamaSampler::top_k(params.top_k));
+        samplers.push(LlamaSampler::top_p(params.top_p, 1));
+        samplers.push(LlamaSampler::min_p(params.min_p, 1));
+        samplers.push(LlamaSampler::temp(params.temperature));
+        samplers.push(LlamaSampler::dist(self.n_past as u32));
+        let mut sampler = LlamaSampler::chain_simple(samplers);
 
         // 追踪 </think> 结束位置
         let mut think_end_pos: Option<usize> = None;
