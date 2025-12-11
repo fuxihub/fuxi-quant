@@ -118,12 +118,13 @@ const sendMessage = async () => {
     isThinkingComplete: false, // 思考是否已结束
     thinkingCollapsed: false,
     thinkingAutoCollapsed: false,
-    thinkingFollowBottom: true,
   })
 
   // 滚动到底部（watch 会在测量后自动滚动）
   shouldFollowBottom.value = true
   isAtBottom.value = true
+  // 立即平滑滚到底，避免发送后不跟随
+  scrollToBottom(true)
 
   // 开始流式对话
   isTyping.value = true
@@ -145,24 +146,14 @@ const sendMessage = async () => {
       // 思考结束
       currentMsg.isThinking = false
       currentMsg.isThinkingComplete = true
-      // 自动折叠思考内容
-      if (!currentMsg.thinkingAutoCollapsed) {
-        currentMsg.thinkingCollapsed = true
-        currentMsg.thinkingAutoCollapsed = true
-      }
     } else if (event.type === 'Token') {
       // 收到 token
       if (currentMsg.isThinking) {
         // 思考中的内容
         currentMsg.thinkingContent += event.data
-        // thinking 内容跟随滚动
-        if (currentMsg.thinkingFollowBottom && !currentMsg.thinkingCollapsed) {
-          nextTick(() => {
-            const thinkingEl = document.querySelector('.thinking-content-active')
-            if (thinkingEl) {
-              thinkingEl.scrollTop = thinkingEl.scrollHeight
-            }
-          })
+        // 若保持底部，思考过程也跟随到底
+        if (shouldFollowBottom.value) {
+          scrollToBottom()
         }
       } else {
         // 正式回复内容，添加到队列
@@ -206,7 +197,7 @@ const renderLoop = () => {
 
     // 跟随滚动
     if (shouldFollowBottom.value) {
-      scrollToBottom()
+      scrollToBottom(true)
     }
   }
 
@@ -226,25 +217,29 @@ const renderLoop = () => {
 // ============ 滚动控制 ============
 const checkScroll = () => {
   if (!parentRef.value) return
-  // 如果正在跟随滚动，不更新 isAtBottom 避免按钮闪烁
-  if (shouldFollowBottom.value) {
-    isAtBottom.value = true
-    return
-  }
   const { scrollTop, scrollHeight, clientHeight } = parentRef.value
   const distanceFromBottom = scrollHeight - scrollTop - clientHeight
   isAtBottom.value = distanceFromBottom < 30
+  // 只要不在底部，则关闭自动跟随，避免需要多次滚动
+  if (!isAtBottom.value) {
+    shouldFollowBottom.value = false
+  }
 }
 
-const handleWheel = () => {
+const handleWheel = (e) => {
+  // 任何滚轮操作都视为用户接管，关闭自动跟随，避免输出时被拉回
   shouldFollowBottom.value = false
+  isAtBottom.value = false
 }
 
-const scrollToBottom = () => {
+const scrollToBottom = (smooth = false) => {
   // 使用虚拟滚动的 scrollToIndex 确保正确定位
   const lastIndex = messages.value.length - 1
   if (lastIndex >= 0) {
-    virtualizer.value.scrollToIndex(lastIndex, { align: 'end' })
+    virtualizer.value.scrollToIndex(lastIndex, {
+      align: 'end',
+      behavior: smooth ? 'smooth' : 'auto',
+    })
   }
 }
 
@@ -359,16 +354,15 @@ const toggleThinking = (index) => {
                         <span>思考过程</span>
                         <span
                           v-if="messages[virtualRow.index]?.isThinking"
-                          class="typing-dots">
-                          ...
+                          class="text-primary/80">
+                          （思考中）
                         </span>
                       </div>
                       <!-- 展开的内容 -->
                       <div
                         v-show="!messages[virtualRow.index]?.thinkingCollapsed"
                         class="thinking-content text-surface-400 dark:text-surface-500 text-xs pl-4 mb-3 border-l-2 border-surface-200 dark:border-surface-700"
-                        :class="{ 'thinking-content-active': messages[virtualRow.index]?.isThinking }"
-                        @wheel.stop="messages[virtualRow.index].thinkingFollowBottom = false">
+                        :class="{ 'thinking-content-active': messages[virtualRow.index]?.isThinking }">
                         {{ messages[virtualRow.index]?.thinkingContent }}
                       </div>
                     </template>
@@ -519,10 +513,7 @@ const toggleThinking = (index) => {
 
 /* Thinking 内容样式 */
 .thinking-content {
-  max-height: 15em; /* 约 10 行 */
   line-height: 1.5;
-  overflow-y: auto;
-  padding-right: 0.75rem; /* 右边距，避免贴着滚动条 */
 }
 
 /* Markdown 内容样式 */

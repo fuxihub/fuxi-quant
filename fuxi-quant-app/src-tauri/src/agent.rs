@@ -38,7 +38,12 @@ pub async fn init_agent(model_path: String) -> Result<String, String> {
 
         if AGENT.get().is_none() {
             let model = model()?;
-            let agent = Agent::new(model, None, 8192).map_err(|e| e.to_string())?;
+            let agent = Agent::new(
+                model,
+                Some(include_str!("../../config/prompt.md").to_string()),
+                8192,
+            )
+            .map_err(|e| e.to_string())?;
             AGENT
                 .set(Mutex::new(agent))
                 .map_err(|_| "智能体已被初始化")?;
