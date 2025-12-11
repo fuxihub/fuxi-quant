@@ -10,13 +10,7 @@ use llama_cpp_2::{
     send_logs_to_tracing,
 };
 use serde::{Deserialize, Serialize};
-use std::{
-    fs,
-    io::{self, Write},
-    num::NonZeroU32,
-    path::Path,
-    sync::Arc,
-};
+use std::{io::Write, num::NonZeroU32, path::Path, sync::Arc};
 
 // ============================================================================
 // YAML 配置结构体
@@ -31,7 +25,7 @@ pub struct ModelsConfig {
 impl ModelsConfig {
     /// 从 YAML 文件加载配置
     pub fn load(path: impl AsRef<Path>) -> Result<Self> {
-        let content = fs::read_to_string(path)?;
+        let content = std::fs::read_to_string(path)?;
         let config: Self = serde_yml::from_str(&content)?;
         Ok(config)
     }
@@ -105,25 +99,6 @@ impl TemplateConfig {
         if let Some(sys) = system {
             prompt.push_str(&self.format_system(sys));
         }
-        prompt.push_str(&self.format_user(user));
-        prompt.push_str(&self.format_assistant_start(thinking));
-        prompt
-    }
-
-    /// 格式化带工具的 prompt
-    pub fn format_prompt_with_tools(
-        &self,
-        system: Option<&str>,
-        user: &str,
-        tools: &crate::tool::ToolRegistry,
-        thinking: bool,
-    ) -> String {
-        let mut prompt = String::new();
-        let sys_content = match system {
-            Some(sys) => format!("{}\n\n{}", sys, tools.to_tool_prompt()),
-            None => tools.to_tool_prompt(),
-        };
-        prompt.push_str(&self.format_system(&sys_content));
         prompt.push_str(&self.format_user(user));
         prompt.push_str(&self.format_assistant_start(thinking));
         prompt
@@ -391,46 +366,7 @@ impl AgentModel {
 
         Ok(output)
     }
-
-    /// 带工具调用的流式对话
-    pub fn chat_with_tools<F>(
-        &self,
-        system: Option<&str>,
-        user: &str,
-        tools: &crate::tool::ToolRegistry,
-        on_token: F,
-    ) -> Result<String>
-    where
-        F: FnMut(&str),
-    {
-        self.chat_with_tools_mode(system, user, tools, ChatMode::Thinking, on_token)
-    }
-
-    /// 带工具调用的流式对话（可指定模式）
-    pub fn chat_with_tools_mode<F>(
-        &self,
-        system: Option<&str>,
-        user: &str,
-        tools: &crate::tool::ToolRegistry,
-        mode: ChatMode,
-        on_token: F,
-    ) -> Result<String>
-    where
-        F: FnMut(&str),
-    {
-        let prompt = self.definition.template.format_prompt_with_tools(
-            system,
-            user,
-            tools,
-            mode.is_thinking(),
-        );
-        let params = self.sampling_params(mode);
-        self.generate(&prompt, params, on_token)
-    }
 }
-
-/// 兼容别名（保持向后兼容）
-pub type Qwen3Llama = AgentModel;
 
 // ============================================================================
 // 聊天会话（复用 KV Cache）
@@ -550,7 +486,7 @@ impl<'a> ChatSession<'a> {
                 output.push_str(&piece);
                 if cfg!(debug_assertions) {
                     print!("{piece}");
-                    let _ = io::stdout().flush();
+                    let _ = std::io::stdout().flush();
                 }
 
                 // Thinking 模式下检测 </think> 结束位置
