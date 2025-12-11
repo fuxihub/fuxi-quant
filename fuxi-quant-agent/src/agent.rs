@@ -56,6 +56,11 @@ impl Agent {
         F: FnMut(StreamEvent),
     {
         on_event(StreamEvent::ThinkBegin);
+        if cfg!(debug_assertions) {
+            println!("{message}");
+            print!("<think>");
+            let _ = std::io::stdout().flush();
+        }
 
         let prompt = if self.is_first_turn {
             let mut p = String::new();

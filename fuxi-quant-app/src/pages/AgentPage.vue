@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, nextTick, watch, onMounted } from 'vue'
+import { ref, computed, nextTick, watch, onMounted, onUnmounted } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { invoke, Channel } from '@tauri-apps/api/core'
 import { marked } from 'marked'
@@ -24,19 +24,36 @@ const renderMarkdown = (content) => {
   return marked.parse(content)
 }
 
-// 进入页面时重置会话，确保前后端同步
-onMounted(async () => {
+// ============ 会话管理 ============
+const sessionId = `session_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`
+
+const createSession = async () => {
   try {
-    await invoke('reset_chat')
+    await invoke('create_session', { sessionId })
+    return true
   } catch (e) {
-    console.error('重置会话失败:', e)
-  } finally {
+    console.error('创建会话失败:', e)
+    return false
+  }
+}
+
+const removeSession = async () => {
+  try {
+    await invoke('remove_session', { sessionId })
+  } catch (e) {
+    console.error('移除会话失败:', e)
+  }
+}
+
+// 进入页面时创建会话
+onMounted(async () => {
+  const success = await createSession()
+  if (success) {
     isReady.value = true
     // 就绪后输入框获得焦点
     nextTick(() => {
       const el = inputRef.value?.$el
       if (el) {
-        // PrimeVue Textarea 可能直接是 textarea 或包含 textarea
         const textarea = el.tagName === 'TEXTAREA' ? el : el.querySelector('textarea')
         textarea?.focus()
       }
@@ -44,31 +61,14 @@ onMounted(async () => {
   }
 })
 
+// 离开页面时移除会话
+onUnmounted(() => {
+  removeSession()
+})
+
 // ============ 常量配置 ============
 const MAX_MESSAGES = 200
 const TYPING_SPEED = { slow: 2, normal: 4, fast: 8 }
-
-// ============ 解析 Thinking 内容 ============
-const parseThinking = (content) => {
-  if (!content) return { thinking: null, response: '', isThinkingComplete: false }
-
-  const thinkStart = content.indexOf('<think>')
-  if (thinkStart === -1) {
-    return { thinking: null, response: content, isThinkingComplete: false }
-  }
-
-  const thinkEnd = content.indexOf('</think>')
-  if (thinkEnd === -1) {
-    // thinking 还未结束
-    const thinkContent = content.slice(thinkStart + 7)
-    return { thinking: thinkContent, response: '', isThinkingComplete: false }
-  }
-
-  // thinking 已结束
-  const thinkContent = content.slice(thinkStart + 7, thinkEnd)
-  const response = content.slice(thinkEnd + 8).trim()
-  return { thinking: thinkContent, response, isThinkingComplete: true }
-}
 
 // ============ 状态 ============
 const messages = ref([])
@@ -134,11 +134,14 @@ const sendMessage = async () => {
   // 添加空的 AI 消息（打字中状态）
   messages.value.push({
     role: 'assistant',
-    content: '',
+    content: '', // 正式回复内容
+    thinkingContent: '', // 思考内容
     isTyping: true,
-    thinkingCollapsed: false, // thinking 折叠状态
-    thinkingAutoCollapsed: false, // 是否已自动折叠过
-    thinkingFollowBottom: true, // thinking 内容跟随底部
+    isThinking: false, // 是否正在思考
+    isThinkingComplete: false, // 思考是否已结束
+    thinkingCollapsed: false,
+    thinkingAutoCollapsed: false,
+    thinkingFollowBottom: true,
   })
 
   // 滚动到底部（watch 会在测量后自动滚动）
@@ -152,12 +155,42 @@ const sendMessage = async () => {
   // 启动渲染循环
   requestAnimationFrame(renderLoop)
 
+  // 当前消息引用
+  const currentMsg = messages.value[messages.value.length - 1]
+
   // 创建 Channel 接收流式响应
   const channel = new Channel()
   channel.onmessage = (event) => {
-    if (event.type === 'Token') {
-      // 收到 token，添加到队列
-      pendingQueue.value += event.data
+    if (event.type === 'ThinkBegin') {
+      // 开始思考
+      currentMsg.isThinking = true
+    } else if (event.type === 'ThinkEnd') {
+      // 思考结束
+      currentMsg.isThinking = false
+      currentMsg.isThinkingComplete = true
+      // 自动折叠思考内容
+      if (!currentMsg.thinkingAutoCollapsed) {
+        currentMsg.thinkingCollapsed = true
+        currentMsg.thinkingAutoCollapsed = true
+      }
+    } else if (event.type === 'Token') {
+      // 收到 token
+      if (currentMsg.isThinking) {
+        // 思考中的内容
+        currentMsg.thinkingContent += event.data
+        // thinking 内容跟随滚动
+        if (currentMsg.thinkingFollowBottom && !currentMsg.thinkingCollapsed) {
+          nextTick(() => {
+            const thinkingEl = document.querySelector('.thinking-content-active')
+            if (thinkingEl) {
+              thinkingEl.scrollTop = thinkingEl.scrollHeight
+            }
+          })
+        }
+      } else {
+        // 正式回复内容，添加到队列
+        pendingQueue.value += event.data
+      }
     } else if (event.type === 'Done') {
       // 完成
       isReceiving.value = false
@@ -170,7 +203,7 @@ const sendMessage = async () => {
   }
 
   try {
-    await invoke('chat', { message: userQuery, channel })
+    await invoke('chat', { sessionId, message: userQuery, channel })
   } catch (e) {
     console.error('调用失败:', e)
     pendingQueue.value += `\n[错误: ${e}]`
@@ -193,22 +226,6 @@ const renderLoop = () => {
 
     const currentMsg = messages.value[messages.value.length - 1]
     currentMsg.content += chunk
-
-    // 检测 thinking 结束，只自动折叠一次
-    if (!currentMsg.thinkingAutoCollapsed && currentMsg.content.includes('</think>')) {
-      currentMsg.thinkingCollapsed = true
-      currentMsg.thinkingAutoCollapsed = true // 标记已自动折叠，不再重复
-    }
-
-    // thinking 内容跟随滚动
-    if (currentMsg.thinkingFollowBottom && !currentMsg.thinkingCollapsed) {
-      nextTick(() => {
-        const thinkingEl = document.querySelector('.thinking-content-active')
-        if (thinkingEl) {
-          thinkingEl.scrollTop = thinkingEl.scrollHeight
-        }
-      })
-    }
 
     // 跟随滚动
     if (shouldFollowBottom.value) {
@@ -277,12 +294,9 @@ const handleKeydown = (e) => {
 }
 
 const clearMessages = async () => {
-  try {
-    await invoke('reset_chat')
-  } catch (e) {
-    console.error('重置会话失败:', e)
-  }
+  await removeSession()
   messages.value = []
+  await createSession()
 }
 
 // 切换 thinking 折叠状态
@@ -352,8 +366,8 @@ const toggleThinking = (index) => {
                     v-else
                     class="max-w-[90%] whitespace-pre-wrap leading-relaxed break-words text-sm px-1 py-3 text-surface-900 dark:text-surface-50">
                     <!-- Thinking 内容 -->
-                    <template v-if="parseThinking(messages[virtualRow.index]?.content).thinking !== null">
-                      <!-- 思考过程标题（始终显示，用 v-show 切换图标和内容） -->
+                    <template v-if="messages[virtualRow.index]?.thinkingContent">
+                      <!-- 思考过程标题 -->
                       <div
                         class="flex items-center gap-1 text-surface-400 text-xs mb-1 cursor-pointer hover:text-surface-600 dark:hover:text-surface-300 select-none"
                         @click.stop.prevent="toggleThinking(virtualRow.index)">
@@ -364,35 +378,31 @@ const toggleThinking = (index) => {
                           "></i>
                         <span>思考过程</span>
                         <span
-                          v-if="!parseThinking(messages[virtualRow.index]?.content).isThinkingComplete"
+                          v-if="messages[virtualRow.index]?.isThinking"
                           class="typing-dots">
                           ...
                         </span>
                       </div>
-                      <!-- 展开的内容（用 v-show 保持 DOM 不销毁） -->
+                      <!-- 展开的内容 -->
                       <div
                         v-show="!messages[virtualRow.index]?.thinkingCollapsed"
                         class="thinking-content text-surface-400 dark:text-surface-500 text-xs pl-4 mb-3 border-l-2 border-surface-200 dark:border-surface-700"
-                        :class="{ 'thinking-content-active': messages[virtualRow.index]?.isTyping }"
+                        :class="{ 'thinking-content-active': messages[virtualRow.index]?.isThinking }"
                         @wheel.stop="messages[virtualRow.index].thinkingFollowBottom = false">
-                        {{ parseThinking(messages[virtualRow.index]?.content).thinking }}
+                        {{ messages[virtualRow.index]?.thinkingContent }}
                       </div>
-                      <!-- 正式回复 (Markdown) -->
-                      <div
-                        v-if="parseThinking(messages[virtualRow.index]?.content).response"
-                        class="markdown-content"
-                        v-html="renderMarkdown(parseThinking(messages[virtualRow.index]?.content).response)"></div>
                     </template>
-                    <!-- 无 thinking 的普通消息 (Markdown) -->
-                    <template v-else>
-                      <div
-                        class="markdown-content"
-                        v-html="renderMarkdown(messages[virtualRow.index]?.content)"></div>
-                    </template>
+                    <!-- 正式回复 (Markdown) -->
+                    <div
+                      v-if="messages[virtualRow.index]?.content"
+                      class="markdown-content"
+                      v-html="renderMarkdown(messages[virtualRow.index]?.content)"></div>
+                    <!-- 打字中省略号（无内容且非思考中时显示） -->
                     <span
                       v-if="
                         messages[virtualRow.index]?.isTyping &&
-                        !parseThinking(messages[virtualRow.index]?.content).thinking
+                        !messages[virtualRow.index]?.content &&
+                        !messages[virtualRow.index]?.isThinking
                       "
                       class="typing-dots">
                       ...
