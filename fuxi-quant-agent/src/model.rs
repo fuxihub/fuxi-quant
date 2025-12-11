@@ -24,14 +24,52 @@ pub struct SamplingParams {
 }
 
 impl Default for SamplingParams {
-    /// 默认使用 Non-Thinking 模式参数
     fn default() -> Self {
+        Self::thinking()
+    }
+}
+
+impl SamplingParams {
+    pub const fn thinking() -> Self {
         Self {
             temperature: 0.6,
             min_p: 0.0,
             top_p: 0.95,
             top_k: 20,
         }
+    }
+
+    pub const fn non_thinking() -> Self {
+        Self {
+            temperature: 0.7,
+            min_p: 0.0,
+            top_p: 0.8,
+            top_k: 20,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ChatMode {
+    #[default]
+    Thinking,
+    NonThinking,
+}
+
+impl ChatMode {
+    pub fn sampling_params(&self) -> SamplingParams {
+        match self {
+            ChatMode::Thinking => SamplingParams::thinking(),
+            ChatMode::NonThinking => SamplingParams::non_thinking(),
+        }
+    }
+
+    pub fn insert_think_tag(&self) -> bool {
+        matches!(self, ChatMode::Thinking)
+    }
+
+    pub fn is_thinking(&self) -> bool {
+        matches!(self, ChatMode::Thinking)
     }
 }
 
@@ -81,8 +119,22 @@ impl Qwen3Llama {
     where
         F: FnMut(&str),
     {
-        let prompt = Self::format_prompt(system, user);
-        self.generate(&prompt, SamplingParams::default(), on_token)
+        self.chat_with_mode(system, user, ChatMode::Thinking, on_token)
+    }
+
+    /// 流式对话（可指定模式：Thinking / NonThinking）
+    pub fn chat_with_mode<F>(
+        &self,
+        system: Option<&str>,
+        user: &str,
+        mode: ChatMode,
+        on_token: F,
+    ) -> Result<String>
+    where
+        F: FnMut(&str),
+    {
+        let prompt = Self::format_prompt(system, user, mode);
+        self.generate(&prompt, mode.sampling_params(), on_token)
     }
 
     /// 流式生成（内部方法）
@@ -156,7 +208,7 @@ impl Qwen3Llama {
     }
 
     /// 简易 ChatML 模板
-    fn format_prompt(system: Option<&str>, user: &str) -> String {
+    fn format_prompt(system: Option<&str>, user: &str, mode: ChatMode) -> String {
         let mut prompt = String::new();
         if let Some(sys) = system {
             prompt.push_str("<|im_start|>system\n");
@@ -167,6 +219,10 @@ impl Qwen3Llama {
         prompt.push_str(user);
         prompt.push_str("<|im_end|>\n");
         prompt.push_str("<|im_start|>assistant\n");
+        if mode.insert_think_tag() {
+            // Thinking 版模型默认会生成 </think>，但不一定生成 <think>，这里显式补齐开标签
+            prompt.push_str("<think>\n");
+        }
         prompt
     }
 
@@ -175,6 +231,7 @@ impl Qwen3Llama {
         system: Option<&str>,
         user: &str,
         tools: &crate::tool::ToolRegistry,
+        mode: ChatMode,
     ) -> String {
         let mut prompt = String::new();
 
@@ -193,6 +250,9 @@ impl Qwen3Llama {
         prompt.push_str("<|im_end|>\n");
 
         prompt.push_str("<|im_start|>assistant\n");
+        if mode.insert_think_tag() {
+            prompt.push_str("<think>\n");
+        }
         prompt
     }
 
@@ -207,8 +267,23 @@ impl Qwen3Llama {
     where
         F: FnMut(&str),
     {
-        let prompt = Self::format_prompt_with_tools(system, user, tools);
-        self.generate(&prompt, SamplingParams::default(), on_token)
+        self.chat_with_tools_mode(system, user, tools, ChatMode::Thinking, on_token)
+    }
+
+    /// 带工具调用的流式对话（可指定模式）
+    pub fn chat_with_tools_mode<F>(
+        &self,
+        system: Option<&str>,
+        user: &str,
+        tools: &crate::tool::ToolRegistry,
+        mode: ChatMode,
+        on_token: F,
+    ) -> Result<String>
+    where
+        F: FnMut(&str),
+    {
+        let prompt = Self::format_prompt_with_tools(system, user, tools, mode);
+        self.generate(&prompt, mode.sampling_params(), on_token)
     }
 }
 
@@ -234,12 +309,25 @@ impl<'a> ChatSession<'a> {
         })
     }
 
-    /// 发送消息（流式回调）
-    pub fn chat<F>(&mut self, user_msg: &str, mut on_token: F) -> Result<String>
+    /// 发送消息（流式回调，默认 Thinking）
+    pub fn chat<F>(&mut self, user_msg: &str, on_token: F) -> Result<String>
     where
         F: FnMut(&str),
     {
-        let prompt = self.build_prompt(user_msg);
+        self.chat_with_mode(user_msg, ChatMode::Thinking, on_token)
+    }
+
+    /// 发送消息（可指定模式）
+    pub fn chat_with_mode<F>(
+        &mut self,
+        user_msg: &str,
+        mode: ChatMode,
+        mut on_token: F,
+    ) -> Result<String>
+    where
+        F: FnMut(&str),
+    {
+        let prompt = self.build_prompt(user_msg, mode);
         let add_bos = if self.n_past == 0 {
             AddBos::Always
         } else {
@@ -273,8 +361,8 @@ impl<'a> ChatSession<'a> {
             .map(NonZeroU32::get)
             .unwrap_or(0) as usize;
 
-        // 在循环外创建采样器（使用 Thinking 模式参数）
-        let params = SamplingParams::default();
+        // 在循环外创建采样器（根据模式参数）
+        let params = mode.sampling_params();
         let mut sampler = LlamaSampler::chain_simple([
             LlamaSampler::top_k(params.top_k),
             LlamaSampler::top_p(params.top_p, 1),
@@ -307,8 +395,8 @@ impl<'a> ChatSession<'a> {
                     let _ = io::stdout().flush();
                 }
 
-                // 检测 </think> 结束位置（包含后面的换行）
-                if think_end_pos.is_none() && output.contains("</think>\n\n") {
+                // Thinking 模式下检测 </think> 结束位置
+                if mode.is_thinking() && think_end_pos.is_none() && output.contains("</think>") {
                     think_end_pos = Some(self.n_past + 1); // +1 因为当前 token 还未计入
                 }
             }
@@ -322,7 +410,9 @@ impl<'a> ChatSession<'a> {
 
         // 官方最佳实践：多轮对话中，历史记录不应包含 thinking 内容
         // 从 KV Cache 中删除 thinking 部分，只保留最终输出
-        if let Some(think_end) = think_end_pos {
+        if mode.is_thinking()
+            && let Some(think_end) = think_end_pos
+        {
             let thinking_len = think_end - assistant_start_pos;
             if thinking_len > 0 {
                 // 删除 thinking 内容的 KV Cache
@@ -360,7 +450,7 @@ impl<'a> ChatSession<'a> {
     }
 
     /// 构建 prompt
-    fn build_prompt(&self, user_msg: &str) -> String {
+    fn build_prompt(&self, user_msg: &str, mode: ChatMode) -> String {
         let mut prompt = String::new();
         if self.n_past == 0
             && let Some(sys) = &self.system
@@ -373,6 +463,9 @@ impl<'a> ChatSession<'a> {
         prompt.push_str(user_msg);
         prompt.push_str("<|im_end|>\n");
         prompt.push_str("<|im_start|>assistant\n");
+        if mode.insert_think_tag() {
+            prompt.push_str("<think>\n");
+        }
         prompt
     }
 }
