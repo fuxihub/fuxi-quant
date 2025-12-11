@@ -14,34 +14,19 @@ use std::{num::NonZeroU32, path::Path};
 #[derive(Debug, Clone, Copy)]
 pub struct SamplingParams {
     pub temperature: f32,
+    pub min_p: f32,
     pub top_p: f32,
     pub top_k: i32,
-    pub min_p: f32,
-    pub presence_penalty: f32,
 }
 
 impl Default for SamplingParams {
     /// 默认使用 Non-Thinking 模式参数
     fn default() -> Self {
         Self {
-            temperature: 0.7,
-            top_p: 0.8,
-            top_k: 20,
-            min_p: 0.0,
-            presence_penalty: 1.5,
-        }
-    }
-}
-
-impl SamplingParams {
-    /// Thinking 模式采样参数
-    pub fn thinking() -> Self {
-        Self {
             temperature: 0.6,
+            min_p: 0.0,
             top_p: 0.95,
             top_k: 20,
-            min_p: 0.0,
-            presence_penalty: 1.5,
         }
     }
 }
@@ -285,7 +270,7 @@ impl<'a> ChatSession<'a> {
             .unwrap_or(0) as usize;
 
         // 在循环外创建采样器（使用 Thinking 模式参数）
-        let params = SamplingParams::thinking();
+        let params = SamplingParams::default();
         let mut sampler = LlamaSampler::chain_simple([
             LlamaSampler::top_k(params.top_k),
             LlamaSampler::top_p(params.top_p, 1),
