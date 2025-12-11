@@ -597,6 +597,8 @@ const toggleThinking = (index) => {
 
 .markdown-content p {
   margin: 0.3em 0;
+  line-height: 1.6;
+  min-height: 1.6em;
 }
 
 .markdown-content strong {
@@ -642,11 +644,12 @@ const toggleThinking = (index) => {
   display: list-item;
   margin: 0;
   padding: 0;
-  line-height: 1.5;
+  line-height: 1.6;
+  min-height: 1.6em;
 }
 
 .markdown-content li + li {
-  margin-top: 0.1em;
+  margin-top: 0.2em;
 }
 
 .markdown-content li > p,
