@@ -111,6 +111,7 @@ impl Agent {
         let think_start = self.n_cur;
         let mut in_thinking = true;
         let mut buffer = String::new();
+        let mut sent_len = 0;
 
         let mut sampler = LlamaSampler::chain_simple([
             LlamaSampler::top_k(20),
@@ -136,13 +137,35 @@ impl Agent {
                 if in_thinking {
                     buffer.push_str(&piece);
                     if let Some(pos) = buffer.find("</think>") {
-                        in_thinking = false;
-                        on_event(StreamEvent::ThinkEnd);
-                        let after = &buffer[pos + 8..];
-                        if !after.is_empty() {
-                            on_event(StreamEvent::Token(after.to_string()));
+                        // 先发送尚未发送的思考内容（到 </think> 之前）
+                        if pos > sent_len {
+                            let part = buffer[sent_len..pos].to_string();
+                            if !part.is_empty() {
+                                on_event(StreamEvent::Token(part));
+                            }
                         }
+
+                        // 结束思考
+                        in_thinking = false;
+                        sent_len = 0;
+                        let after = buffer[pos + 8..].to_string();
                         buffer.clear();
+
+                        // 思考结束事件
+                        on_event(StreamEvent::ThinkEnd);
+
+                        // 发送思考结束后的正式回复起始内容（如果有）
+                        if !after.is_empty() {
+                            on_event(StreamEvent::Token(after));
+                        }
+                    }
+                    // 未遇到 </think>，持续推送新增的思考内容
+                    else if buffer.len() > sent_len {
+                        let part = buffer[sent_len..].to_string();
+                        if !part.is_empty() {
+                            on_event(StreamEvent::Token(part));
+                        }
+                        sent_len = buffer.len();
                     }
                 } else {
                     on_event(StreamEvent::Token(piece));
