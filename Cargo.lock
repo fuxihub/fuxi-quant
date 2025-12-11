@@ -1647,6 +1647,7 @@ name = "fuxi-quant-agent"
 version = "1.0.0"
 dependencies = [
  "anyhow",
+ "indexmap 2.12.1",
  "llama-cpp-2",
  "rmcp",
  "schemars 0.8.22",

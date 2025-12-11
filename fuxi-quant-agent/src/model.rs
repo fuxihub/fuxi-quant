@@ -1,4 +1,5 @@
 use anyhow::Result;
+use indexmap::IndexMap;
 use llama_cpp_2::{
     LogOptions,
     context::{LlamaContext, params::LlamaContextParams},
@@ -10,7 +11,6 @@ use llama_cpp_2::{
 };
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::HashMap,
     fs,
     io::{self, Write},
     num::NonZeroU32,
@@ -53,24 +53,14 @@ impl ModelsConfig {
 pub struct ModelDefinition {
     pub id: String,
     pub name: String,
-    #[serde(default)]
     pub family: String,
-    #[serde(default)]
     pub tier: String,
-    #[serde(default)]
     pub download_url: Option<String>,
-    #[serde(default)]
     pub filename: Option<String>,
-    #[serde(default = "default_true")]
     pub supports_thinking: bool,
-    #[serde(default = "default_true")]
     pub supports_tools: bool,
     pub template: TemplateConfig,
     pub sampling: SamplingConfig,
-}
-
-fn default_true() -> bool {
-    true
 }
 
 /// 对话模板配置
@@ -82,7 +72,6 @@ pub struct TemplateConfig {
     pub user_suffix: String,
     pub assistant_prefix: String,
     pub assistant_suffix: String,
-    #[serde(default)]
     pub think_tag: Option<String>,
 }
 
@@ -155,9 +144,6 @@ pub struct SamplingParams {
     pub min_p: f32,
     pub top_p: f32,
     pub top_k: i32,
-    /// presence_penalty: 0.0 to 2.0, 用于减少重复
-    /// llama.cpp 默认关闭，设置 1.0 可减少重复
-    #[serde(default)]
     pub presence_penalty: f32,
 }
 
@@ -168,7 +154,7 @@ pub struct SamplingParams {
 /// 模型注册表，管理所有模型配置
 #[derive(Debug, Clone, Default)]
 pub struct ModelRegistry {
-    models: HashMap<String, Arc<ModelDefinition>>,
+    models: IndexMap<String, Arc<ModelDefinition>>,
 }
 
 impl ModelRegistry {
@@ -179,7 +165,7 @@ impl ModelRegistry {
 
     /// 从配置创建注册表
     pub fn from_config(config: ModelsConfig) -> Self {
-        let mut models = HashMap::new();
+        let mut models = IndexMap::new();
         for model in config.models {
             models.insert(model.id.clone(), Arc::new(model));
         }
