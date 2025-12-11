@@ -64,6 +64,10 @@ const lockedScrollTop = ref(null)
 const isUserScrolling = ref(false)
 let scrollLockTimer = null
 
+// 滚动节流（避免频繁滚动导致抖动）
+let lastScrollTime = 0
+const SCROLL_THROTTLE = 50 // ms
+
 // ============ 虚拟滚动配置 ============
 const virtualizerOptions = computed(() => ({
   count: messages.value.length,
@@ -97,11 +101,11 @@ const currentMsgContent = computed(() => {
 })
 
 watch(currentMsgContent, () => {
-  // 非跟随模式时，保持滚动位置稳定
-  if (!shouldFollowBottom.value && parentRef.value && lockedScrollTop.value !== null) {
+  // 非跟随模式且用户未在主动滚动时，保持滚动位置稳定
+  if (!shouldFollowBottom.value && !isUserScrolling.value && parentRef.value && lockedScrollTop.value !== null) {
     // 使用 requestAnimationFrame 确保在 DOM 更新后恢复位置
     requestAnimationFrame(() => {
-      if (parentRef.value && lockedScrollTop.value !== null) {
+      if (parentRef.value && lockedScrollTop.value !== null && !isUserScrolling.value) {
         parentRef.value.scrollTop = lockedScrollTop.value
       }
     })
@@ -174,9 +178,13 @@ const sendMessage = async () => {
       if (currentMsg.isThinking) {
         // 思考中的内容
         currentMsg.thinkingContent += event.data
-        // 若保持底部，思考过程也跟随到底（使用 instant 避免动画堆积）
+        // 若保持底部，思考过程也跟随到底（节流避免抖动）
         if (shouldFollowBottom.value) {
-          scrollToBottom(false)
+          const now = Date.now()
+          if (now - lastScrollTime > SCROLL_THROTTLE) {
+            lastScrollTime = now
+            scrollToBottom(false)
+          }
         }
       } else {
         // 正式回复内容，添加到队列
@@ -259,7 +267,11 @@ const handleWheel = (e) => {
   const isScrollingUp = e.deltaY < 0
 
   // 向上滚动时脱离跟随模式
-  if (isScrollingUp && shouldFollowBottom.value) {
+  if (isScrollingUp) {
+    // 立即锁定当前滚动位置
+    if (parentRef.value) {
+      lockedScrollTop.value = parentRef.value.scrollTop
+    }
     shouldFollowBottom.value = false
     isAtBottom.value = false
   }
@@ -267,37 +279,35 @@ const handleWheel = (e) => {
   // 标记用户正在滚动
   isUserScrolling.value = true
 
-  // 记录当前滚动位置用于锁定
-  if (parentRef.value) {
-    // 延迟更新锁定位置，等滚动稳定后
-    clearTimeout(scrollLockTimer)
-    scrollLockTimer = setTimeout(() => {
-      if (parentRef.value && !shouldFollowBottom.value) {
-        lockedScrollTop.value = parentRef.value.scrollTop
-      }
-      isUserScrolling.value = false
-    }, 150)
-  }
+  // 延迟更新锁定位置，等滚动稳定后
+  clearTimeout(scrollLockTimer)
+  scrollLockTimer = setTimeout(() => {
+    if (parentRef.value && !shouldFollowBottom.value) {
+      lockedScrollTop.value = parentRef.value.scrollTop
+    }
+    isUserScrolling.value = false
+  }, 150)
 }
 
 const scrollToBottom = (smooth = false) => {
   // 清除锁定位置
   lockedScrollTop.value = null
 
-  // 使用虚拟滚动的 scrollToIndex 确保正确定位
-  const lastIndex = messages.value.length - 1
-  if (lastIndex >= 0) {
-    virtualizer.value.scrollToIndex(lastIndex, {
-      align: 'end',
-      behavior: smooth ? 'smooth' : 'auto',
-    })
+  // 使用原生 scrollTop 滚动，避免虚拟滚动 scrollToIndex 在高度变化时抖动
+  if (parentRef.value) {
+    const target = parentRef.value.scrollHeight - parentRef.value.clientHeight
+    if (smooth) {
+      parentRef.value.scrollTo({ top: target, behavior: 'smooth' })
+    } else {
+      parentRef.value.scrollTop = target
+    }
   }
 }
 
 const scrollToBottomSmooth = () => {
-  const lastIndex = messages.value.length - 1
-  if (lastIndex >= 0) {
-    virtualizer.value.scrollToIndex(lastIndex, { align: 'end', behavior: 'smooth' })
+  if (parentRef.value) {
+    const target = parentRef.value.scrollHeight - parentRef.value.clientHeight
+    parentRef.value.scrollTo({ top: target, behavior: 'smooth' })
   }
 }
 
