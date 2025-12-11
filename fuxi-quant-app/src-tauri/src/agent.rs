@@ -1,24 +1,29 @@
-use fuxi_quant_agent::model::{AgentModel, ChatSession, ModelRegistry};
-use std::sync::{Mutex, OnceLock};
+use fuxi_quant_agent::Qwen3Agent;
+use fuxi_quant_agent::agent::Agent;
+use fuxi_quant_agent::model::Model;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, OnceLock};
 use tauri::ipc::Channel;
 
-/// 全局模型注册表
-static REGISTRY: OnceLock<ModelRegistry> = OnceLock::new();
-
 /// 全局模型实例
-static MODEL: OnceLock<AgentModel> = OnceLock::new();
+static MODEL: OnceLock<Arc<Model>> = OnceLock::new();
 
-/// 全局会话实例
-static SESSION: OnceLock<Mutex<Option<ChatSessionWrapper>>> = OnceLock::new();
+/// 全局会话 Map
+static SESSIONS: OnceLock<Mutex<HashMap<String, Qwen3Agent>>> = OnceLock::new();
 
-/// ChatSession 包装器（处理生命周期）
-struct ChatSessionWrapper {
-    inner: ChatSession<'static>,
+fn sessions() -> &'static Mutex<HashMap<String, Qwen3Agent>> {
+    SESSIONS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-// Safety: ChatSession 内部已经是线程安全的
-unsafe impl Send for ChatSessionWrapper {}
-unsafe impl Sync for ChatSessionWrapper {}
+fn model() -> Result<&'static Model, String> {
+    MODEL
+        .get()
+        .map(|m| {
+            let ptr = Arc::as_ptr(m);
+            unsafe { &*ptr }
+        })
+        .ok_or_else(|| "模型未加载".to_string())
+}
 
 /// 流式响应事件
 #[derive(Clone, serde::Serialize)]
@@ -29,49 +34,37 @@ pub enum StreamEvent {
     Error(String),
 }
 
-/// 加载模型配置
+/// 加载模型
 #[tauri::command]
-pub async fn load_config(config_path: String) -> Result<String, String> {
-    if REGISTRY.get().is_some() {
-        return Ok("配置已加载".into());
+pub async fn load_model(model_path: String) -> Result<String, String> {
+    if MODEL.get().is_some() {
+        return Ok("模型已加载".into());
     }
 
     tauri::async_runtime::spawn_blocking(move || {
-        let registry = ModelRegistry::load(&config_path).map_err(|e| e.to_string())?;
-        let model_ids: Vec<_> = registry.model_ids().iter().map(|s| s.to_string()).collect();
-        REGISTRY.set(registry).map_err(|_| "配置已被加载")?;
-        Ok(format!("配置加载成功，可用模型: {:?}", model_ids))
+        let model = Model::load(&model_path).map_err(|e| e.to_string())?;
+        MODEL.set(model).map_err(|_| "模型已被加载")?;
+        Ok("模型加载成功".into())
     })
     .await
     .map_err(|e| e.to_string())?
 }
 
-/// 加载模型（异步，避免阻塞主线程）
+/// 创建新会话
 #[tauri::command]
-pub async fn load_model(model_id: String, model_path: String) -> Result<String, String> {
-    if MODEL.get().is_some() {
-        return Ok("模型已加载".into());
-    }
-
-    // 在后台线程加载模型
+pub async fn create_session(
+    session_id: String,
+    sys_prompt: Option<String>,
+    ctx_len: Option<u32>,
+) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let registry = REGISTRY.get().ok_or("请先加载配置文件")?;
-        let definition = registry.get(&model_id).ok_or("模型未在配置中定义")?;
-        let agent = AgentModel::load(&model_path, definition).map_err(|e| e.to_string())?;
-        MODEL.set(agent).map_err(|_| "模型已被加载")?;
-
-        // 初始化会话
-        let model = MODEL.get().unwrap();
-        let session = ChatSession::new(model, Some("你是阿强，一个专业的量化交易策略助手。根据用户的交易想法，帮助生成可执行的量化策略代码。你擅长技术分析、因子挖掘和风险控制。回答时直接给出策略逻辑和代码，简洁实用。"))
+        let model = model()?;
+        let agent = Qwen3Agent::create(model, sys_prompt, ctx_len.unwrap_or(8192))
             .map_err(|e| e.to_string())?;
 
-        // Safety: MODEL 是 'static，所以 session 也可以安全地保存
-        let wrapper = ChatSessionWrapper {
-            inner: unsafe { std::mem::transmute::<ChatSession<'_>, ChatSession<'static>>(session) },
-        };
-
-        SESSION.get_or_init(|| Mutex::new(Some(wrapper)));
-        Ok("模型加载成功".into())
+        let mut map = sessions().lock().map_err(|e| e.to_string())?;
+        map.insert(session_id, agent);
+        Ok(())
     })
     .await
     .map_err(|e| e.to_string())?
@@ -79,19 +72,22 @@ pub async fn load_model(model_id: String, model_path: String) -> Result<String, 
 
 /// 发送消息（流式响应）
 #[tauri::command]
-pub async fn chat(message: String, channel: Channel<StreamEvent>) -> Result<(), String> {
+pub async fn chat(
+    session_id: String,
+    message: String,
+    channel: Channel<StreamEvent>,
+) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let session_mutex = SESSION.get().ok_or("模型未加载")?;
-        let mut guard = session_mutex.lock().map_err(|e| e.to_string())?;
-        let session = guard.as_mut().ok_or("会话未初始化")?;
+        let mut map = sessions().lock().map_err(|e| e.to_string())?;
+        let agent = map.get_mut(&session_id).ok_or("会话不存在")?;
 
-        let result = session.inner.chat(&message, |token| {
+        let result = agent.chat(&message, |token| {
             let _ = channel.send(StreamEvent::Token(token.to_string()));
         });
 
         match result {
-            Ok(response) => {
-                let _ = channel.send(StreamEvent::Done(response));
+            Ok(()) => {
+                let _ = channel.send(StreamEvent::Done(String::new()));
                 Ok(())
             }
             Err(e) => {
@@ -104,25 +100,10 @@ pub async fn chat(message: String, channel: Channel<StreamEvent>) -> Result<(), 
     .map_err(|e| e.to_string())?
 }
 
-/// 重置会话（异步）
+/// 删除会话
 #[tauri::command]
-pub async fn reset_chat() -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(|| {
-        let model = MODEL.get().ok_or("模型未加载")?;
-
-        let session = ChatSession::new(model, Some("你是阿强，一个专业的量化交易策略助手。根据用户的交易想法，帮助生成可执行的量化策略代码。你擅长技术分析、因子挖掘和风险控制。回答时直接给出策略逻辑和代码，简洁实用。"))
-            .map_err(|e| e.to_string())?;
-
-        let wrapper = ChatSessionWrapper {
-            inner: unsafe { std::mem::transmute::<ChatSession<'_>, ChatSession<'static>>(session) },
-        };
-
-        let session_mutex = SESSION.get().ok_or("会话未初始化")?;
-        let mut guard = session_mutex.lock().map_err(|e| e.to_string())?;
-        *guard = Some(wrapper);
-
-        Ok(())
-    })
-    .await
-    .map_err(|e| e.to_string())?
+pub async fn remove_session(session_id: String) -> Result<(), String> {
+    let mut map = sessions().lock().map_err(|e| e.to_string())?;
+    map.remove(&session_id);
+    Ok(())
 }

@@ -6,8 +6,9 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             agent::load_model,
+            agent::create_session,
             agent::chat,
-            agent::reset_chat
+            agent::remove_session
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

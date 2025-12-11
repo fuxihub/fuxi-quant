@@ -1,11 +1,10 @@
 use crate::model::Model;
 use anyhow::Result;
-use std::sync::Arc;
 
 pub trait Agent {
-    fn new(model: Arc<Model>, sys_prompt: Option<String>, ctx_len: u32) -> impl Agent;
-    fn chat<F>(&mut self, message: &str, on_token: Option<F>) -> Result<String>
+    fn new(model: &'static Model, sys_prompt: Option<String>, ctx_len: u32) -> Result<impl Agent>;
+
+    fn chat<F>(&mut self, message: &str, on_token: F) -> Result<()>
     where
         F: FnMut(&str);
-    fn reset(&mut self);
 }
