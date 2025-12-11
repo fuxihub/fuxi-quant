@@ -26,7 +26,7 @@ const renderMarkdown = (content) => {
 
 // 更新消息的缓存渲染结果（节流避免频繁渲染）
 let renderTimer = null
-const RENDER_THROTTLE = 100 // ms
+const RENDER_THROTTLE = 35 // ms
 
 const updateRenderedContent = (msg) => {
   if (!msg) return
