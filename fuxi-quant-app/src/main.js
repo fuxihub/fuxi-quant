@@ -1,4 +1,6 @@
 import { createApp } from "vue";
+import { invoke } from "@tauri-apps/api/core";
+import { resolveResource } from "@tauri-apps/api/path";
 import PrimeVue from 'primevue/config';
 import Aura from '@primeuix/themes/aura';
 import Ripple from 'primevue/ripple';
@@ -31,7 +33,7 @@ app.use(PrimeVue, {
 app.directive('ripple', Ripple);
 app.directive('tooltip', Tooltip);
 
-// 加载模型后显示应用
+// 初始化智能体后显示应用
 
 const showApp = () => {
     const logo = document.querySelector('.loading-logo');
@@ -43,4 +45,9 @@ const showApp = () => {
     }
 };
 
-showApp()
+resolveResource("resources/agent.gguf")
+    .then((modelPath) => invoke("init_agent", { modelPath }))
+    .then(() => showApp())
+    .catch((err) => {
+        alert(`智能体初始化失败: ${err}`);
+    });
