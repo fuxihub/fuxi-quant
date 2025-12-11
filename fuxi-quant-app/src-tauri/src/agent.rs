@@ -1,9 +1,12 @@
-use fuxi_quant_agent::model::{ChatSession, Qwen3Llama};
+use fuxi_quant_agent::model::{AgentModel, ChatSession, ModelRegistry};
 use std::sync::{Mutex, OnceLock};
 use tauri::ipc::Channel;
 
+/// 全局模型注册表
+static REGISTRY: OnceLock<ModelRegistry> = OnceLock::new();
+
 /// 全局模型实例
-static MODEL: OnceLock<Qwen3Llama> = OnceLock::new();
+static MODEL: OnceLock<AgentModel> = OnceLock::new();
 
 /// 全局会话实例
 static SESSION: OnceLock<Mutex<Option<ChatSessionWrapper>>> = OnceLock::new();
@@ -26,17 +29,36 @@ pub enum StreamEvent {
     Error(String),
 }
 
+/// 加载模型配置
+#[tauri::command]
+pub async fn load_config(config_path: String) -> Result<String, String> {
+    if REGISTRY.get().is_some() {
+        return Ok("配置已加载".into());
+    }
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let registry = ModelRegistry::load(&config_path).map_err(|e| e.to_string())?;
+        let model_ids: Vec<_> = registry.model_ids().iter().map(|s| s.to_string()).collect();
+        REGISTRY.set(registry).map_err(|_| "配置已被加载")?;
+        Ok(format!("配置加载成功，可用模型: {:?}", model_ids))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// 加载模型（异步，避免阻塞主线程）
 #[tauri::command]
-pub async fn load_model(model_path: String) -> Result<String, String> {
+pub async fn load_model(model_id: String, model_path: String) -> Result<String, String> {
     if MODEL.get().is_some() {
         return Ok("模型已加载".into());
     }
 
     // 在后台线程加载模型
     tauri::async_runtime::spawn_blocking(move || {
-        let llama = Qwen3Llama::load(&model_path).map_err(|e| e.to_string())?;
-        MODEL.set(llama).map_err(|_| "模型已被加载")?;
+        let registry = REGISTRY.get().ok_or("请先加载配置文件")?;
+        let definition = registry.get(&model_id).ok_or("模型未在配置中定义")?;
+        let agent = AgentModel::load(&model_path, definition).map_err(|e| e.to_string())?;
+        MODEL.set(agent).map_err(|_| "模型已被加载")?;
 
         // 初始化会话
         let model = MODEL.get().unwrap();

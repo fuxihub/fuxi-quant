@@ -1,0 +1,177 @@
+# Agent 模型配置文件
+# 支持配置多个模型，每个模型有独立的模板和采样参数
+
+models:
+  # ============================================================================
+  # Qwen3 系列
+  # ============================================================================
+  - id: qwen3-4b
+    name: Qwen3 4B
+    family: qwen3
+    tier: low
+    download_url: https://huggingface.co/Qwen/Qwen3-4B-GGUF/resolve/main/qwen3-4b-q4_k_m.gguf
+    filename: qwen3-4b-q4_k_m.gguf
+    supports_thinking: true
+    supports_tools: true
+    template:
+      system_prefix: "<|im_start|>system\n"
+      system_suffix: "<|im_end|>\n"
+      user_prefix: "<|im_start|>user\n"
+      user_suffix: "<|im_end|>\n"
+      assistant_prefix: "<|im_start|>assistant\n"
+      assistant_suffix: "<|im_end|>\n"
+      think_tag: "<think>\n"
+    sampling:
+      thinking:
+        temperature: 0.6
+        top_p: 0.95
+        top_k: 20
+        min_p: 0.0
+      non_thinking:
+        temperature: 0.7
+        top_p: 0.8
+        top_k: 20
+        min_p: 0.0
+
+  - id: qwen3-8b
+    name: Qwen3 8B
+    family: qwen3
+    tier: medium
+    download_url: https://huggingface.co/Qwen/Qwen3-8B-GGUF/resolve/main/qwen3-8b-q4_k_m.gguf
+    filename: qwen3-8b-q4_k_m.gguf
+    supports_thinking: true
+    supports_tools: true
+    template:
+      system_prefix: "<|im_start|>system\n"
+      system_suffix: "<|im_end|>\n"
+      user_prefix: "<|im_start|>user\n"
+      user_suffix: "<|im_end|>\n"
+      assistant_prefix: "<|im_start|>assistant\n"
+      assistant_suffix: "<|im_end|>\n"
+      think_tag: "<think>\n"
+    sampling:
+      thinking:
+        temperature: 0.6
+        top_p: 0.95
+        top_k: 20
+        min_p: 0.0
+      non_thinking:
+        temperature: 0.7
+        top_p: 0.8
+        top_k: 20
+        min_p: 0.0
+
+  - id: qwen3-32b
+    name: Qwen3 32B
+    family: qwen3
+    tier: high
+    download_url: https://huggingface.co/Qwen/Qwen3-32B-GGUF/resolve/main/qwen3-32b-q4_k_m.gguf
+    filename: qwen3-32b-q4_k_m.gguf
+    supports_thinking: true
+    supports_tools: true
+    template:
+      system_prefix: "<|im_start|>system\n"
+      system_suffix: "<|im_end|>\n"
+      user_prefix: "<|im_start|>user\n"
+      user_suffix: "<|im_end|>\n"
+      assistant_prefix: "<|im_start|>assistant\n"
+      assistant_suffix: "<|im_end|>\n"
+      think_tag: "<think>\n"
+    sampling:
+      thinking:
+        temperature: 0.6
+        top_p: 0.95
+        top_k: 20
+        min_p: 0.0
+      non_thinking:
+        temperature: 0.7
+        top_p: 0.8
+        top_k: 20
+        min_p: 0.0
+
+  # ============================================================================
+  # DeepSeek 系列
+  # ============================================================================
+  - id: deepseek-7b
+    name: DeepSeek 7B
+    family: deepseek
+    tier: low
+    download_url: https://huggingface.co/deepseek-ai/DeepSeek-R1-Distill-Qwen-7B-GGUF/resolve/main/DeepSeek-R1-Distill-Qwen-7B-Q4_K_M.gguf
+    filename: deepseek-r1-distill-qwen-7b-q4_k_m.gguf
+    supports_thinking: true
+    supports_tools: true
+    template:
+      system_prefix: '<｜begin▁of▁sentence｜>'
+      system_suffix: "\n\n"
+      user_prefix: '<｜User｜>'
+      user_suffix: "\n"
+      assistant_prefix: '<｜Assistant｜>'
+      assistant_suffix: '<｜end▁of▁sentence｜>'
+      think_tag: "<think>\n"
+    sampling:
+      thinking:
+        temperature: 0.6
+        top_p: 0.95
+        top_k: 40
+        min_p: 0.0
+      non_thinking:
+        temperature: 0.7
+        top_p: 0.9
+        top_k: 40
+        min_p: 0.0
+
+  - id: deepseek-14b
+    name: DeepSeek 14B
+    family: deepseek
+    tier: medium
+    download_url: https://huggingface.co/deepseek-ai/DeepSeek-R1-Distill-Qwen-14B-GGUF/resolve/main/DeepSeek-R1-Distill-Qwen-14B-Q4_K_M.gguf
+    filename: deepseek-r1-distill-qwen-14b-q4_k_m.gguf
+    supports_thinking: true
+    supports_tools: true
+    template:
+      system_prefix: '<｜begin▁of▁sentence｜>'
+      system_suffix: "\n\n"
+      user_prefix: '<｜User｜>'
+      user_suffix: "\n"
+      assistant_prefix: '<｜Assistant｜>'
+      assistant_suffix: '<｜end▁of▁sentence｜>'
+      think_tag: "<think>\n"
+    sampling:
+      thinking:
+        temperature: 0.6
+        top_p: 0.95
+        top_k: 40
+        min_p: 0.0
+      non_thinking:
+        temperature: 0.7
+        top_p: 0.9
+        top_k: 40
+        min_p: 0.0
+
+  - id: deepseek-32b
+    name: DeepSeek 32B
+    family: deepseek
+    tier: high
+    download_url: https://huggingface.co/deepseek-ai/DeepSeek-R1-Distill-Qwen-32B-GGUF/resolve/main/DeepSeek-R1-Distill-Qwen-32B-Q4_K_M.gguf
+    filename: deepseek-r1-distill-qwen-32b-q4_k_m.gguf
+    supports_thinking: true
+    supports_tools: true
+    template:
+      system_prefix: '<｜begin▁of▁sentence｜>'
+      system_suffix: "\n\n"
+      user_prefix: '<｜User｜>'
+      user_suffix: "\n"
+      assistant_prefix: '<｜Assistant｜>'
+      assistant_suffix: '<｜end▁of▁sentence｜>'
+      think_tag: "<think>\n"
+    sampling:
+      thinking:
+        temperature: 0.6
+        top_p: 0.95
+        top_k: 40
+        min_p: 0.0
+      non_thinking:
+        temperature: 0.7
+        top_p: 0.9
+        top_k: 40
+        min_p: 0.0
