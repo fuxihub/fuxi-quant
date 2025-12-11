@@ -24,6 +24,26 @@ const renderMarkdown = (content) => {
   return marked.parse(content)
 }
 
+// 更新消息的缓存渲染结果（节流避免频繁渲染）
+let renderTimer = null
+const RENDER_THROTTLE = 100 // ms
+
+const updateRenderedContent = (msg) => {
+  if (!msg) return
+  // 直接更新缓存
+  if (msg.content) {
+    msg.renderedContent = marked.parse(msg.content)
+  }
+}
+
+const scheduleRender = (msg) => {
+  if (renderTimer) return // 已有定时器，跳过
+  renderTimer = setTimeout(() => {
+    renderTimer = null
+    updateRenderedContent(msg)
+  }, RENDER_THROTTLE)
+}
+
 // 进入页面时清空上下文
 onMounted(async () => {
   try {
@@ -137,6 +157,7 @@ const sendMessage = async () => {
   messages.value.push({
     role: 'assistant',
     content: '', // 正式回复内容
+    renderedContent: '', // 缓存的 Markdown 渲染结果
     thinkingContent: '', // 思考内容
     isTyping: true,
     isThinking: false, // 是否正在思考
@@ -169,11 +190,13 @@ const sendMessage = async () => {
       currentMsg.isThinking = false
       currentMsg.isThinkingComplete = true
     } else if (event.type === 'Token') {
-      // 收到 token，直接更新内容（流式显示，无打字效果）
+      // 收到 token，直接更新内容（流式显示）
       if (currentMsg.isThinking) {
         currentMsg.thinkingContent += event.data
       } else {
         currentMsg.content += event.data
+        // 节流更新 Markdown 渲染缓存
+        scheduleRender(currentMsg)
       }
       // 跟随滚动（节流）
       if (shouldFollowBottom.value) {
@@ -188,6 +211,8 @@ const sendMessage = async () => {
       isReceiving.value = false
       isTyping.value = false
       currentMsg.isTyping = false
+      // 最终渲染（确保完整）
+      updateRenderedContent(currentMsg)
       // 最终滚动到底部
       if (shouldFollowBottom.value) {
         scrollToBottom(false)
@@ -397,7 +422,10 @@ const toggleThinking = (index) => {
                     <div
                       v-if="messages[virtualRow.index]?.content"
                       class="markdown-content"
-                      v-html="renderMarkdown(messages[virtualRow.index]?.content)"></div>
+                      v-html="
+                        messages[virtualRow.index]?.renderedContent ||
+                        renderMarkdown(messages[virtualRow.index]?.content)
+                      "></div>
                     <!-- 打字中省略号（无内容且非思考中时显示） -->
                     <span
                       v-if="
