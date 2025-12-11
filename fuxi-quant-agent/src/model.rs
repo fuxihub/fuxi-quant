@@ -8,7 +8,11 @@ use llama_cpp_2::{
     sampling::LlamaSampler,
     send_logs_to_tracing,
 };
-use std::{num::NonZeroU32, path::Path};
+use std::{
+    io::{self, Write},
+    num::NonZeroU32,
+    path::Path,
+};
 
 /// 采样参数（官方推荐值）
 #[derive(Debug, Clone, Copy)]
@@ -298,6 +302,10 @@ impl<'a> ChatSession<'a> {
             if let Ok(piece) = self.llama.model.token_to_str(next_token, Special::Tokenize) {
                 on_token(&piece);
                 output.push_str(&piece);
+                if cfg!(debug_assertions) {
+                    print!("{piece}");
+                    let _ = io::stdout().flush();
+                }
 
                 // 检测 </think> 结束位置（包含后面的换行）
                 if think_end_pos.is_none() && output.contains("</think>\n\n") {
