@@ -152,7 +152,7 @@ impl Qwen3Llama {
     }
 
     /// 简易 ChatML 模板
-    fn format_prompt(system: Option<&str>, user: &str) -> String {
+    fn format_prompt_impl(system: Option<&str>, user: &str, force_think: bool) -> String {
         let mut prompt = String::new();
         if let Some(sys) = system {
             prompt.push_str("<|im_start|>system\n");
@@ -163,14 +163,24 @@ impl Qwen3Llama {
         prompt.push_str(user);
         prompt.push_str("<|im_end|>\n");
         prompt.push_str("<|im_start|>assistant\n");
+        if force_think {
+            // 显式开启思维模式：在回复开头预置 <think>
+            prompt.push_str("<think>\n");
+        }
         prompt
     }
 
+    /// 简易 ChatML 模板（默认不强制显式 <think>）
+    fn format_prompt(system: Option<&str>, user: &str) -> String {
+        Self::format_prompt_impl(system, user, false)
+    }
+
     /// 带工具的 ChatML 模板（Hermes-style tool use）
-    fn format_prompt_with_tools(
+    fn format_prompt_with_tools_impl(
         system: Option<&str>,
         user: &str,
         tools: &crate::tool::ToolRegistry,
+        force_think: bool,
     ) -> String {
         let mut prompt = String::new();
 
@@ -189,7 +199,19 @@ impl Qwen3Llama {
         prompt.push_str("<|im_end|>\n");
 
         prompt.push_str("<|im_start|>assistant\n");
+        if force_think {
+            prompt.push_str("<think>\n");
+        }
         prompt
+    }
+
+    /// 带工具的 ChatML 模板（Hermes-style tool use，默认不强制显式 <think>）
+    fn format_prompt_with_tools(
+        system: Option<&str>,
+        user: &str,
+        tools: &crate::tool::ToolRegistry,
+    ) -> String {
+        Self::format_prompt_with_tools_impl(system, user, tools, false)
     }
 
     /// 带工具调用的流式对话
@@ -206,6 +228,35 @@ impl Qwen3Llama {
         let prompt = Self::format_prompt_with_tools(system, user, tools);
         self.generate(&prompt, SamplingParams::default(), on_token)
     }
+
+    /// 带工具调用的流式对话（显式预置 <think>，兼容只输出 </think> 的模型）
+    pub fn chat_with_tools_force_think<F>(
+        &self,
+        system: Option<&str>,
+        user: &str,
+        tools: &crate::tool::ToolRegistry,
+        on_token: F,
+    ) -> Result<String>
+    where
+        F: FnMut(&str),
+    {
+        let prompt = Self::format_prompt_with_tools_impl(system, user, tools, true);
+        self.generate(&prompt, SamplingParams::default(), on_token)
+    }
+
+    /// 流式对话（显式预置 <think>，兼容只输出 </think> 的模型）
+    pub fn chat_force_think<F>(
+        &self,
+        system: Option<&str>,
+        user: &str,
+        on_token: F,
+    ) -> Result<String>
+    where
+        F: FnMut(&str),
+    {
+        let prompt = Self::format_prompt_impl(system, user, true);
+        self.generate(&prompt, SamplingParams::default(), on_token)
+    }
 }
 
 /// 支持连续对话的会话（复用 KV Cache）
@@ -214,6 +265,7 @@ pub struct ChatSession<'a> {
     ctx: LlamaContext<'a>,
     system: Option<String>,
     n_past: usize,
+    force_think: bool,
 }
 
 impl<'a> ChatSession<'a> {
@@ -227,6 +279,25 @@ impl<'a> ChatSession<'a> {
             ctx,
             system: system.map(String::from),
             n_past: 0,
+            force_think: false,
+        })
+    }
+
+    /// 创建会话（可强制预置 <think>，兼容只输出 </think> 的模型）
+    pub fn new_force_think(
+        llama: &'a Qwen3Llama,
+        system: Option<&str>,
+        force_think: bool,
+    ) -> Result<Self> {
+        let ctx = llama
+            .model
+            .new_context(&llama.backend, llama.ctx_params.clone())?;
+        Ok(Self {
+            llama,
+            ctx,
+            system: system.map(String::from),
+            n_past: 0,
+            force_think,
         })
     }
 
@@ -279,7 +350,7 @@ impl<'a> ChatSession<'a> {
             LlamaSampler::dist(self.n_past as u32),
         ]);
 
-        // 追踪 </think> 结束位置
+        // 追踪 </think> 结束位置（模型可能只输出闭合标签，没有显式 <think>）
         let mut think_end_pos: Option<usize> = None;
 
         loop {
@@ -299,8 +370,8 @@ impl<'a> ChatSession<'a> {
                 on_token(&piece);
                 output.push_str(&piece);
 
-                // 检测 </think> 结束位置（包含后面的换行）
-                if think_end_pos.is_none() && output.contains("</think>\n\n") {
+                // 检测 </think> 结束位置：兼容只输出闭合标签或有换行的情况
+                if think_end_pos.is_none() && output.contains("</think>") {
                     think_end_pos = Some(self.n_past + 1); // +1 因为当前 token 还未计入
                 }
             }
@@ -365,6 +436,9 @@ impl<'a> ChatSession<'a> {
         prompt.push_str(user_msg);
         prompt.push_str("<|im_end|>\n");
         prompt.push_str("<|im_start|>assistant\n");
+        if self.force_think {
+            prompt.push_str("<think>\n");
+        }
         prompt
     }
 }
