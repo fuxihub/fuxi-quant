@@ -347,12 +347,45 @@ impl Agent {
             // 收集本轮响应
             let mut round_response = String::new();
             let mut had_tool_call = false;
+            let mut pending_tokens = String::new(); // 缓存待发送的 token
+            let mut in_tool_call = false; // 是否在 tool_call 区域内
 
             self.chat_internal(&current_message, |event| {
-                if let StreamEvent::Token(token) = &event {
-                    round_response.push_str(token);
+                match &event {
+                    StreamEvent::Token(token) => {
+                        round_response.push_str(token);
+
+                        // 如果已经在 tool_call 区域，不发送任何内容
+                        if in_tool_call {
+                            return;
+                        }
+
+                        pending_tokens.push_str(token);
+
+                        // 检查是否进入 tool_call 区域
+                        if pending_tokens.contains("<tool_call>") {
+                            in_tool_call = true;
+                            // 发送 <tool_call> 之前的非 JSON 内容
+                            if let Some(pos) = pending_tokens.find("<tool_call>") {
+                                let before = pending_tokens[..pos].trim();
+                                // 过滤掉可能是工具调用 JSON 的内容
+                                if !before.is_empty() && !before.starts_with("{\"name\"") {
+                                    on_event(StreamEvent::Token(before.to_string()));
+                                }
+                            }
+                            pending_tokens.clear();
+                        } else if pending_tokens.contains("<tool")
+                            || pending_tokens.contains("{\"name\"")
+                        {
+                            // 可能是 tool_call 开始或 JSON 工具调用，继续缓存
+                        } else {
+                            // 安全发送
+                            on_event(StreamEvent::Token(pending_tokens.clone()));
+                            pending_tokens.clear();
+                        }
+                    }
+                    _ => on_event(event),
                 }
-                on_event(event);
             })?;
 
             // 检查是否有工具调用

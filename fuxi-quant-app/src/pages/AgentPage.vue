@@ -206,6 +206,17 @@ const sendMessage = async () => {
           scrollToBottom(false)
         }
       }
+    } else if (event.type === 'ToolCall') {
+      // 工具调用 - 显示使用的工具名称
+      try {
+        const call = JSON.parse(event.data)
+        currentMsg.content += `\n\n🔧 使用工具: \`${call.name}\`\n`
+        scheduleRender(currentMsg)
+      } catch (e) {
+        console.error('解析工具调用失败:', e)
+      }
+    } else if (event.type === 'ToolResult') {
+      // 工具结果 - 忽略，不显示
     } else if (event.type === 'Done') {
       // 完成
       isReceiving.value = false
