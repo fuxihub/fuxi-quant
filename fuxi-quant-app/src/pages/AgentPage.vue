@@ -53,6 +53,7 @@ const inputContent = ref('')
 const parentRef = ref(null)
 const isTyping = ref(false)
 const pendingQueue = ref('')
+const thinkingQueue = ref('') // 思考内容队列
 const isReceiving = ref(false)
 const isAtBottom = ref(true)
 const shouldFollowBottom = ref(true)
@@ -176,16 +177,8 @@ const sendMessage = async () => {
     } else if (event.type === 'Token') {
       // 收到 token
       if (currentMsg.isThinking) {
-        // 思考中的内容
-        currentMsg.thinkingContent += event.data
-        // 若保持底部，思考过程也跟随到底（节流避免抖动）
-        if (shouldFollowBottom.value) {
-          const now = Date.now()
-          if (now - lastScrollTime > SCROLL_THROTTLE) {
-            lastScrollTime = now
-            scrollToBottom(false)
-          }
-        }
+        // 思考中的内容，添加到队列（批量更新避免卡顿）
+        thinkingQueue.value += event.data
       } else {
         // 正式回复内容，添加到队列
         pendingQueue.value += event.data
@@ -210,40 +203,54 @@ const sendMessage = async () => {
   }
 }
 
-// ============ 打字机渲染循环（优化版：根据积压量动态调整速度） ============
+// ============ 打字机渲染循环（优化版：同时处理思考和回复内容） ============
 const renderLoop = () => {
+  const currentMsg = messages.value[messages.value.length - 1]
+  if (!currentMsg) return
+
+  let needScroll = false
+
+  // 处理思考内容队列
+  if (thinkingQueue.value.length > 0) {
+    const backlog = thinkingQueue.value.length
+    // 思考内容使用更大的批次（不需要打字效果）
+    let speed = backlog > 100 ? TYPING_SPEED.instant : TYPING_SPEED.fast
+
+    const chunk = thinkingQueue.value.slice(0, speed)
+    thinkingQueue.value = thinkingQueue.value.slice(speed)
+    currentMsg.thinkingContent += chunk
+    needScroll = true
+  }
+
+  // 处理正式回复内容队列
   if (pendingQueue.value.length > 0) {
-    // 根据积压量动态调整速度（积压越多越快）
     const backlog = pendingQueue.value.length
     let speed = TYPING_SPEED.slow
     if (backlog > 200) speed = TYPING_SPEED.instant
     else if (backlog > 100) speed = TYPING_SPEED.fast
     else if (backlog > 30) speed = TYPING_SPEED.normal
 
-    // 批量消费字符
     const chunk = pendingQueue.value.slice(0, speed)
     pendingQueue.value = pendingQueue.value.slice(speed)
-
-    const currentMsg = messages.value[messages.value.length - 1]
     currentMsg.content += chunk
+    needScroll = true
+  }
 
-    // 跟随滚动（节流避免频繁滚动）
-    if (shouldFollowBottom.value) {
-      const now = Date.now()
-      if (now - lastScrollTime > SCROLL_THROTTLE) {
-        lastScrollTime = now
-        scrollToBottom(false)
-      }
+  // 跟随滚动（节流避免频繁滚动）
+  if (needScroll && shouldFollowBottom.value) {
+    const now = Date.now()
+    if (now - lastScrollTime > SCROLL_THROTTLE) {
+      lastScrollTime = now
+      scrollToBottom(false)
     }
   }
 
   // 继续循环或结束
-  if (pendingQueue.value.length > 0 || isReceiving.value) {
+  if (thinkingQueue.value.length > 0 || pendingQueue.value.length > 0 || isReceiving.value) {
     requestAnimationFrame(renderLoop)
   } else {
     // 打字结束，立即清理状态
     isTyping.value = false
-    const currentMsg = messages.value[messages.value.length - 1]
     if (currentMsg) {
       currentMsg.isTyping = false
     }
