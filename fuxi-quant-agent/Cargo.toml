@@ -10,6 +10,9 @@ readme.workspace = true
 anyhow = { workspace = true }
 llama-cpp-2 = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+chrono-tz = { workspace = true }
 
 # [target.'cfg(not(target_os = "macos"))'.dependencies]
 # llama-cpp-2 = { workspace = true, default-features = false }

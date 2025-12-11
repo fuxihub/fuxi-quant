@@ -1,5 +1,6 @@
-use fuxi_quant_agent::agent::{Agent, StreamEvent};
+use fuxi_quant_agent::agent::{Agent, AgentConfig, StreamEvent};
 use fuxi_quant_agent::model::Model;
+use fuxi_quant_agent::tool::builtin;
 use std::sync::{Arc, Mutex, OnceLock};
 use tauri::ipc::Channel;
 
@@ -38,12 +39,10 @@ pub async fn init_agent(model_path: String) -> Result<String, String> {
 
         if AGENT.get().is_none() {
             let model = model()?;
-            let agent = Agent::new(
-                model,
-                Some(include_str!("../../config/prompt.md").to_string()),
-                8192,
-            )
-            .map_err(|e| e.to_string())?;
+            let config = AgentConfig::new()
+                .with_system_prompt(include_str!("../../config/prompt.md"))
+                .with_ctx_len(8192);
+            let agent = Agent::new(model, config).map_err(|e| e.to_string())?;
             AGENT
                 .set(Mutex::new(agent))
                 .map_err(|_| "智能体已被初始化")?;
@@ -62,12 +61,19 @@ pub async fn chat(message: String, channel: Channel<StreamEvent>) -> Result<(), 
         let agent_mutex = agent()?;
         let mut agent = agent_mutex.lock().map_err(|e| e.to_string())?;
 
-        let result = agent.chat(&message, |event| {
-            let _ = channel.send(event);
-        });
+        let result = agent.chat_with_tools(
+            &message,
+            |event| {
+                let _ = channel.send(event);
+            },
+            builtin::execute_builtin,
+        );
 
         match result {
-            Ok(()) => Ok(()),
+            Ok(_) => {
+                let _ = channel.send(StreamEvent::Done);
+                Ok(())
+            }
             Err(e) => {
                 let _ = channel.send(StreamEvent::Error(e.to_string()));
                 Err(e.to_string())

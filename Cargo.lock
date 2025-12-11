@@ -1647,8 +1647,11 @@ name = "fuxi-quant-agent"
 version = "1.0.0"
 dependencies = [
  "anyhow",
+ "chrono",
+ "chrono-tz",
  "llama-cpp-2",
  "serde",
+ "serde_json",
 ]
 
 [[package]]
