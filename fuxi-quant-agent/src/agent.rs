@@ -226,10 +226,18 @@ impl Agent {
         let mut buffer = String::new();
         let mut sent_len = 0;
 
+        let (temp, top_p, presence_penalty) = if self.config.enable_thinking {
+            (0.6, 0.95, 0.0)
+        } else {
+            (0.7, 0.8, 1.5)
+        };
+
         let mut sampler = LlamaSampler::chain_simple([
             LlamaSampler::top_k(20),
-            LlamaSampler::top_p(0.95, 1),
-            LlamaSampler::temp(0.6),
+            LlamaSampler::top_p(top_p, 1),
+            LlamaSampler::min_p(0.0, 1),
+            LlamaSampler::temp(temp),
+            LlamaSampler::penalties(-1, 1.0, 0.0, presence_penalty),
             LlamaSampler::dist(self.n_cur as u32),
         ]);
 
@@ -237,7 +245,7 @@ impl Agent {
             let next_token = sampler.sample(ctx, -1);
             sampler.accept(next_token);
 
-            if next_token == self.model.model.token_eos() {
+            if self.model.model.is_eog_token(next_token) {
                 break;
             }
 
@@ -509,10 +517,18 @@ impl Agent {
             (0.7, 0.8)
         };
 
+        let presence_penalty = if self.config.enable_thinking {
+            0.0
+        } else {
+            1.5
+        };
+
         let mut sampler = LlamaSampler::chain_simple([
             LlamaSampler::top_k(20),
             LlamaSampler::top_p(top_p, 1),
+            LlamaSampler::min_p(0.0, 1),
             LlamaSampler::temp(temp),
+            LlamaSampler::penalties(-1, 1.0, 0.0, presence_penalty),
             LlamaSampler::dist(self.n_cur as u32),
         ]);
 
@@ -520,7 +536,7 @@ impl Agent {
             let next_token = sampler.sample(ctx, -1);
             sampler.accept(next_token);
 
-            if next_token == self.model.model.token_eos() {
+            if self.model.model.is_eog_token(next_token) {
                 break;
             }
 
