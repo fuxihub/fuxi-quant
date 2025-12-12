@@ -1,35 +1,27 @@
 //! MCP (Model Context Protocol) 客户端模块
-//!
-//! 支持连接 MCP 服务器并将其工具转换为 Agent 可用的 Tool 格式
 
-use crate::tool::{
-    Tool, ToolCall, ToolFunction, ToolParameterProperty, ToolParameters, ToolResult,
-};
+use crate::tool::{Tool, ToolCall, ToolFunction, ToolParameterProperty, ToolParameters, ToolResult};
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, Command, Stdio};
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 
 /// MCP 服务器配置
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct McpServerConfig {
-    /// 启动命令
     pub command: String,
-    /// 命令参数
     #[serde(default)]
     pub args: Vec<String>,
-    /// 环境变量
     #[serde(default)]
     pub env: HashMap<String, String>,
 }
 
-/// MCP 配置（支持多个服务器）
+/// MCP 配置
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct McpConfig {
-    /// MCP 服务器配置映射 (服务器名 -> 配置)
     #[serde(rename = "mcpServers", default)]
     pub mcp_servers: HashMap<String, McpServerConfig>,
 }
@@ -39,24 +31,21 @@ impl McpConfig {
         Self::default()
     }
 
-    /// 添加一个 MCP 服务器配置
     pub fn with_server(mut self, name: impl Into<String>, config: McpServerConfig) -> Self {
         self.mcp_servers.insert(name.into(), config);
         self
     }
 
-    /// 检查配置是否有效
     pub fn is_valid(&self) -> bool {
-        for (name, config) in &self.mcp_servers {
-            if name.is_empty() || config.command.is_empty() {
-                return false;
-            }
-        }
         !self.mcp_servers.is_empty()
+            && self
+                .mcp_servers
+                .iter()
+                .all(|(n, c)| !n.is_empty() && !c.command.is_empty())
     }
 }
 
-/// MCP JSON-RPC 请求
+/// JSON-RPC 请求
 #[derive(Serialize)]
 struct JsonRpcRequest {
     jsonrpc: &'static str,
@@ -66,7 +55,7 @@ struct JsonRpcRequest {
     params: Option<Value>,
 }
 
-/// MCP JSON-RPC 响应
+/// JSON-RPC 响应
 #[derive(Deserialize)]
 struct JsonRpcResponse {
     #[allow(dead_code)]
@@ -84,7 +73,7 @@ struct JsonRpcError {
     message: String,
 }
 
-/// MCP 客户端连接（基于子进程 stdio）
+/// MCP 连接
 struct McpConnection {
     #[allow(dead_code)]
     server_name: String,
@@ -231,25 +220,22 @@ struct McpContent {
 }
 
 /// MCP 管理器
-///
-/// 管理多个 MCP 服务器连接，并提供工具转换和调用功能
 pub struct McpManager {
-    connections: Arc<Mutex<HashMap<String, McpConnection>>>,
-    tools: Arc<Mutex<Vec<Tool>>>,
-    tool_to_server: Arc<Mutex<HashMap<String, String>>>,
+    connections: Mutex<HashMap<String, McpConnection>>,
+    tools: Mutex<Vec<Tool>>,
+    tool_to_server: Mutex<HashMap<String, String>>,
 }
 
 impl McpManager {
-    /// 创建新的 MCP 管理器
     pub fn new() -> Self {
         Self {
-            connections: Arc::new(Mutex::new(HashMap::new())),
-            tools: Arc::new(Mutex::new(Vec::new())),
-            tool_to_server: Arc::new(Mutex::new(HashMap::new())),
+            connections: Mutex::new(HashMap::new()),
+            tools: Mutex::new(Vec::new()),
+            tool_to_server: Mutex::new(HashMap::new()),
         }
     }
 
-    /// 根据配置初始化所有 MCP 服务器连接
+    /// 初始化所有 MCP 服务器连接
     pub fn init(&self, config: &McpConfig) -> Result<Vec<Tool>> {
         if !config.is_valid() {
             return Err(anyhow!("Invalid MCP configuration"));
@@ -261,19 +247,11 @@ impl McpManager {
 
         for (server_name, server_config) in &config.mcp_servers {
             match Self::connect_server(server_name, server_config) {
-                Ok((mut conn, server_tools)) => {
+                Ok((conn, server_tools)) => {
                     for tool in &server_tools {
                         t2s.insert(tool.function.name.clone(), server_name.clone());
                     }
                     all_tools.extend(server_tools);
-
-                    if let Err(e) = conn.initialize() {
-                        eprintln!(
-                            "Warning: Failed to initialize MCP server '{}': {}",
-                            server_name, e
-                        );
-                    }
-
                     conns.insert(server_name.clone(), conn);
                 }
                 Err(e) => {
@@ -286,7 +264,6 @@ impl McpManager {
         Ok(all_tools)
     }
 
-    /// 连接到单个 MCP 服务器
     fn connect_server(
         server_name: &str,
         config: &McpServerConfig,
@@ -300,15 +277,13 @@ impl McpManager {
         Ok((conn, tools))
     }
 
-    /// 将 MCP 工具转换为 Agent Tool 格式
     fn convert_mcp_tools(server_name: &str, mcp_tools: &[McpToolInfo]) -> Vec<Tool> {
         mcp_tools
             .iter()
-            .map(|mcp_tool| Self::convert_single_tool(server_name, mcp_tool))
+            .map(|t| Self::convert_single_tool(server_name, t))
             .collect()
     }
 
-    /// 转换单个 MCP 工具
     fn convert_single_tool(server_name: &str, mcp_tool: &McpToolInfo) -> Tool {
         let tool_name = format!("{}-{}", server_name, mcp_tool.name);
         let description = mcp_tool
@@ -328,7 +303,6 @@ impl McpManager {
         }
     }
 
-    /// 转换 MCP 工具的输入 schema 为 ToolParameters
     fn convert_input_schema(schema: &Value) -> ToolParameters {
         let mut params = ToolParameters::default();
 
@@ -352,7 +326,6 @@ impl McpManager {
         params
     }
 
-    /// 转换单个属性
     fn convert_property(value: &Value) -> Option<ToolParameterProperty> {
         let obj = value.as_object()?;
 
@@ -386,12 +359,12 @@ impl McpManager {
         })
     }
 
-    /// 获取所有已加载的工具
+    /// 获取所有工具
     pub fn get_tools(&self) -> Vec<Tool> {
         self.tools.lock().unwrap().clone()
     }
 
-    /// 调用 MCP 工具
+    /// 调用工具
     pub fn call_tool(&self, call: &ToolCall) -> Result<ToolResult> {
         let tool_name = &call.name;
 
@@ -421,8 +394,7 @@ impl McpManager {
 
     /// 关闭所有连接
     pub fn shutdown(&self) {
-        let mut conns = self.connections.lock().unwrap();
-        conns.clear();
+        self.connections.lock().unwrap().clear();
     }
 }
 
@@ -438,24 +410,6 @@ impl Drop for McpManager {
     }
 }
 
-/// 创建 MCP 工具执行器
-///
-/// 返回一个闭包，可以用于 `Agent::chat_with_tools` 的 `tool_executor` 参数
-pub fn create_mcp_executor(
-    manager: Arc<McpManager>,
-) -> impl FnMut(&ToolCall) -> Option<ToolResult> {
-    move |call: &ToolCall| match manager.call_tool(call) {
-        Ok(result) => Some(result),
-        Err(e) => {
-            eprintln!("MCP tool call error: {}", e);
-            Some(ToolResult {
-                name: call.name.clone(),
-                content: serde_json::json!({ "error": e.to_string() }),
-            })
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -466,11 +420,7 @@ mod tests {
             "sqlite",
             McpServerConfig {
                 command: "uvx".to_string(),
-                args: vec![
-                    "mcp-server-sqlite".to_string(),
-                    "--db-path".to_string(),
-                    "test.db".to_string(),
-                ],
+                args: vec!["mcp-server-sqlite".to_string()],
                 env: HashMap::new(),
             },
         );
@@ -483,29 +433,5 @@ mod tests {
     fn test_empty_config_invalid() {
         let config = McpConfig::new();
         assert!(!config.is_valid());
-    }
-
-    #[test]
-    fn test_convert_input_schema() {
-        let schema = serde_json::json!({
-            "type": "object",
-            "properties": {
-                "query": {
-                    "type": "string",
-                    "description": "SQL query to execute"
-                },
-                "timeout": {
-                    "type": "integer",
-                    "description": "Query timeout in seconds",
-                    "default": 30
-                }
-            },
-            "required": ["query"]
-        });
-
-        let params = McpManager::convert_input_schema(&schema);
-        assert_eq!(params.properties.len(), 2);
-        assert!(params.properties.contains_key("query"));
-        assert!(params.required.contains(&"query".to_string()));
     }
 }

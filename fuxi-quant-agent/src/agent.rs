@@ -1,9 +1,7 @@
-use crate::mcp::McpConfig;
-use crate::model::Model;
-use crate::tool::{
-    Tool, ToolCall, ToolResult, build_tool_system_prompt, format_tool_responses, has_tool_call,
-    parse_tool_calls,
-};
+//! 智能体模块
+
+use crate::mcp::{McpConfig, McpManager};
+use crate::tool::{Tool, ToolCall, ToolResult, has_tool_call, parse_tool_calls};
 use anyhow::Result;
 use llama_cpp_2::{
     context::{LlamaContext, params::LlamaContextParams},
@@ -11,59 +9,30 @@ use llama_cpp_2::{
     model::{AddBos, Special},
     sampling::LlamaSampler,
 };
-use std::{io::Write, num::NonZeroU32};
+use std::{io::Write, num::NonZeroU32, sync::Arc};
 
-/// Agent 配置
-#[derive(Clone, Debug, Default)]
-pub struct AgentConfig {
-    /// 系统提示词
-    pub system_prompt: Option<String>,
-    /// 上下文长度
-    pub ctx_len: u32,
-    /// 工具列表
-    pub tools: Vec<Tool>,
-    /// 最大工具调用轮数
-    pub max_tool_rounds: usize,
-    /// MCP 配置
-    pub mcp_config: Option<McpConfig>,
-}
+use crate::model::Model;
 
-impl AgentConfig {
-    pub fn new(ctx_len: u32, mcp_config: Option<McpConfig>) -> Self {
-        Self {
-            system_prompt: None,
-            ctx_len,
-            tools: crate::tool::builtin::all_builtin_tools(),
-            max_tool_rounds: 10,
-            mcp_config,
-        }
-    }
+/// 内置系统提示词
+const SYSTEM_PROMPT: &str = r#"你是一个智能助手，可以使用工具来帮助用户完成任务。
 
-    pub fn with_system_prompt(mut self, prompt: impl Into<String>) -> Self {
-        self.system_prompt = Some(prompt.into());
-        self
-    }
+使用工具时，请遵循以下格式：
+Thought: 思考需要做什么
+Action: 工具名称
+Action Input: {"参数名": "参数值"}
+Observation: 工具返回结果
 
-    pub fn with_tools(mut self, tools: Vec<Tool>) -> Self {
-        self.tools = tools;
-        self
-    }
+完成任务后，使用以下格式回复：
+Thought: 我现在知道最终答案了
+Final Answer: 最终答案"#;
 
-    pub fn with_tool(mut self, tool: Tool) -> Self {
-        self.tools.push(tool);
-        self
-    }
-
-    pub fn with_max_tool_rounds(mut self, rounds: usize) -> Self {
-        self.max_tool_rounds = rounds;
-        self
-    }
-}
-
+/// 智能体
 pub struct Agent {
     model: &'static Model,
-    config: AgentConfig,
     ctx: LlamaContext<'static>,
+    ctx_len: u32,
+    mcp_manager: Option<Arc<McpManager>>,
+    tools: Vec<Tool>,
     n_cur: usize,
     is_first_turn: bool,
 }
@@ -72,28 +41,46 @@ unsafe impl Send for Agent {}
 unsafe impl Sync for Agent {}
 
 impl Agent {
-    pub fn new(model: &'static Model, config: AgentConfig) -> Result<Self> {
+    /// 创建智能体
+    ///
+    /// # 参数
+    /// - `model`: 模型实例
+    /// - `ctx_len`: 上下文最大长度
+    /// - `mcp_config`: MCP 配置（可选）
+    pub fn new(model: &'static Model, ctx_len: u32, mcp_config: Option<McpConfig>) -> Result<Self> {
         let ctx = model.model.new_context(
             &model.backend,
             LlamaContextParams::default()
-                .with_n_ctx(NonZeroU32::new(config.ctx_len))
+                .with_n_ctx(NonZeroU32::new(ctx_len))
                 .with_n_batch(512),
         )?;
 
+        // 初始化 MCP 管理器并获取工具
+        let (mcp_manager, tools) = if let Some(config) = mcp_config {
+            let manager = Arc::new(McpManager::new());
+            let mcp_tools = manager.init(&config).unwrap_or_default();
+            (Some(manager), mcp_tools)
+        } else {
+            (None, Vec::new())
+        };
+
         Ok(Self {
             model,
-            config,
             ctx,
+            ctx_len,
+            mcp_manager,
+            tools,
             n_cur: 0,
             is_first_turn: true,
         })
     }
 
+    /// 重置对话
     pub fn reset(&mut self) -> Result<()> {
         self.ctx = self.model.model.new_context(
             &self.model.backend,
             LlamaContextParams::default()
-                .with_n_ctx(NonZeroU32::new(self.config.ctx_len))
+                .with_n_ctx(NonZeroU32::new(self.ctx_len))
                 .with_n_batch(512),
         )?;
         self.n_cur = 0;
@@ -101,41 +88,62 @@ impl Agent {
         Ok(())
     }
 
+    /// 获取工具列表
     pub fn tools(&self) -> &[Tool] {
-        &self.config.tools
+        &self.tools
     }
 
-    fn build_system_prompt(&self) -> Option<String> {
-        if self.config.tools.is_empty() {
-            self.config.system_prompt.clone()
+    /// 构建系统提示词（包含工具描述）
+    fn build_system_prompt(&self) -> String {
+        if self.tools.is_empty() {
+            return SYSTEM_PROMPT.to_string();
+        }
+
+        let mut prompt = SYSTEM_PROMPT.to_string();
+        prompt.push_str("\n\n可用工具：\n");
+
+        for tool in &self.tools {
+            let params_json = serde_json::to_string(&tool.function.parameters).unwrap_or_default();
+            prompt.push_str(&format!(
+                "\n{}: {}\n参数: {}\n",
+                tool.function.name, tool.function.description, params_json
+            ));
+        }
+
+        prompt
+    }
+
+    /// 执行工具调用
+    fn execute_tool(&self, call: &ToolCall) -> Option<ToolResult> {
+        if let Some(ref manager) = self.mcp_manager {
+            match manager.call_tool(call) {
+                Ok(result) => Some(result),
+                Err(e) => Some(ToolResult {
+                    name: call.name.clone(),
+                    content: serde_json::json!({ "error": e.to_string() }),
+                }),
+            }
         } else {
-            Some(build_tool_system_prompt(
-                self.config.system_prompt.as_deref(),
-                &self.config.tools,
-            ))
+            None
         }
     }
 
-    /// 流式对话（支持 thinking + 工具调用）
-    pub fn chat<F, E>(
-        &mut self,
-        message: &str,
-        mut on_token: F,
-        mut tool_executor: E,
-    ) -> Result<String>
+    /// 流式对话
+    ///
+    /// # 参数
+    /// - `message`: 用户消息
+    /// - `on_token`: token 回调函数
+    ///
+    /// # 返回
+    /// 完整的响应文本
+    pub fn chat<F>(&mut self, message: &str, mut on_token: F) -> Result<String>
     where
         F: FnMut(&str),
-        E: FnMut(&ToolCall) -> Option<ToolResult>,
     {
         let mut current_message = message.to_string();
-        let mut rounds = 0;
+        let max_rounds = 10;
 
-        loop {
-            if rounds >= self.config.max_tool_rounds {
-                break;
-            }
-            rounds += 1;
-
+        for _ in 0..max_rounds {
             let response = self.generate(&current_message, &mut on_token)?;
 
             // 检查工具调用
@@ -144,52 +152,48 @@ impl Agent {
                 let mut results = Vec::new();
 
                 for call in &tool_calls {
-                    if let Some(result) = tool_executor(call) {
+                    if let Some(result) = self.execute_tool(call) {
                         results.push(result);
                     }
                 }
 
                 if !results.is_empty() {
-                    current_message = format_tool_responses(&results);
+                    // 格式化工具结果作为下一轮输入
+                    current_message = results
+                        .iter()
+                        .map(|r| {
+                            let json = serde_json::to_string_pretty(&r.content).unwrap_or_default();
+                            format!("Observation: {}", json)
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n");
                     continue;
                 }
             }
 
-            return Ok(crate::tool::extract_content_without_tool_calls(&response));
+            // 提取最终答案
+            return Ok(extract_final_answer(&response));
         }
 
         Ok(String::new())
     }
 
-    /// 核心生成方法
+    /// 核心生成方法（始终使用 think 模式）
     fn generate<F>(&mut self, message: &str, on_token: &mut F) -> Result<String>
     where
         F: FnMut(&str),
     {
-        // ReAct: 第一轮带工具时添加 Question 前缀
-        let formatted = if self.is_first_turn && !self.config.tools.is_empty() {
-            format!("Question: {}\nThought:", message)
-        } else {
-            message.to_string()
-        };
-
         // 构建 prompt
         let prompt = if self.is_first_turn {
-            let mut p = String::new();
-            if let Some(sys) = self.build_system_prompt() {
-                p.push_str("<|im_start|>system\n");
-                p.push_str(&sys);
-                p.push_str("<|im_end|>\n");
-            }
-            p.push_str("<|im_start|>user\n");
-            p.push_str(&formatted);
-            p.push_str("<|im_end|>\n");
-            p.push_str("<|im_start|>assistant\n<think>");
-            p
+            let sys = self.build_system_prompt();
+            format!(
+                "<|im_start|>system\n{}<|im_end|>\n<|im_start|>user\n{}<|im_end|>\n<|im_start|>assistant\n<think>",
+                sys, message
+            )
         } else {
             format!(
                 "<|im_start|>user\n{}<|im_end|>\n<|im_start|>assistant\n<think>",
-                formatted
+                message
             )
         };
 
@@ -254,7 +258,6 @@ impl Agent {
                         let after = buffer[pos + 8..].trim_start();
                         if !after.is_empty() {
                             response.push_str(after);
-                            // 不在 thinking 阶段输出 Action 相关内容
                             if !after.contains("Action") {
                                 on_token(after);
                             }
@@ -263,7 +266,6 @@ impl Agent {
                     }
                 } else {
                     response.push_str(&piece);
-                    // 检测到 Action 后不再输出
                     if !response.contains("Action:") {
                         on_token(&piece);
                     }
@@ -304,4 +306,16 @@ impl Agent {
 
         Ok(response)
     }
+}
+
+/// 提取最终答案
+fn extract_final_answer(output: &str) -> String {
+    if let Some(pos) = output.find("Final Answer:") {
+        let start = pos + "Final Answer:".len();
+        return output[start..].trim().to_string();
+    }
+    if let Some(pos) = output.find("Action:") {
+        return output[..pos].trim().to_string();
+    }
+    output.trim().to_string()
 }

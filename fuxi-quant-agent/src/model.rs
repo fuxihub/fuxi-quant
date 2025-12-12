@@ -5,21 +5,23 @@ use llama_cpp_2::{
     model::{LlamaModel, params::LlamaModelParams},
     send_logs_to_tracing,
 };
-use std::{path::Path, sync::Arc};
+use std::path::Path;
 
+/// 模型
 pub struct Model {
     pub(crate) backend: LlamaBackend,
     pub(crate) model: LlamaModel,
 }
 
 impl Model {
-    pub fn load(model_path: impl AsRef<Path>) -> Result<Arc<Self>> {
+    /// 加载模型
+    pub fn load(model_path: impl AsRef<Path>) -> Result<Self> {
         send_logs_to_tracing(LogOptions::default().with_logs_enabled(false));
 
         let backend = LlamaBackend::init()?;
         let model_params = LlamaModelParams::default().with_n_gpu_layers(999);
         let model = LlamaModel::load_from_file(&backend, model_path.as_ref(), &model_params)?;
 
-        Ok(Arc::new(Self { backend, model }))
+        Ok(Self { backend, model })
     }
 }
