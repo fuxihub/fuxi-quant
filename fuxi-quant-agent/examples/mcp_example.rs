@@ -17,7 +17,7 @@ fn main() -> anyhow::Result<()> {
 
     // 1. 加载模型
     let model = Model::load(&args[1])?;
-    let model: &'static Model = Box::leak(Box::new(std::sync::Arc::try_unwrap(model).unwrap()));
+    let model: &'static Model = Box::leak(Box::new(model));
 
     // 2. 创建 MCP 配置（可选）
     let mcp_config = McpConfig::new().with_server(
