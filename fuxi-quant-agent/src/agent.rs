@@ -29,23 +29,18 @@ pub struct AgentConfig {
 }
 
 impl AgentConfig {
-    pub fn new() -> Self {
+    pub fn new(ctx_len: u32, mcp_config: Option<McpConfig>) -> Self {
         Self {
             system_prompt: None,
-            ctx_len: 8192,
+            ctx_len,
             tools: crate::tool::builtin::all_builtin_tools(),
             max_tool_rounds: 10,
-            mcp_config: None,
+            mcp_config,
         }
     }
 
     pub fn with_system_prompt(mut self, prompt: impl Into<String>) -> Self {
         self.system_prompt = Some(prompt.into());
-        self
-    }
-
-    pub fn with_ctx_len(mut self, len: u32) -> Self {
-        self.ctx_len = len;
         self
     }
 
@@ -61,11 +56,6 @@ impl AgentConfig {
 
     pub fn with_max_tool_rounds(mut self, rounds: usize) -> Self {
         self.max_tool_rounds = rounds;
-        self
-    }
-
-    pub fn with_mcp_config(mut self, config: McpConfig) -> Self {
-        self.mcp_config = Some(config);
         self
     }
 }
@@ -203,11 +193,19 @@ impl Agent {
             )
         };
 
-        let add_bos = if self.is_first_turn { AddBos::Always } else { AddBos::Never };
+        let add_bos = if self.is_first_turn {
+            AddBos::Always
+        } else {
+            AddBos::Never
+        };
         self.is_first_turn = false;
 
         // Tokenize & decode prompt
-        let tokens = self.model.model.str_to_token(&prompt, add_bos).map_err(|e| anyhow::anyhow!(e))?;
+        let tokens = self
+            .model
+            .model
+            .str_to_token(&prompt, add_bos)
+            .map_err(|e| anyhow::anyhow!(e))?;
         let mut batch = LlamaBatch::new(512, 1);
 
         for chunk_start in (0..tokens.len()).step_by(512) {
@@ -281,13 +279,22 @@ impl Agent {
         // 清理 KV cache 中的 thinking 内容
         if think_start < self.n_cur {
             let len = self.n_cur - think_start;
-            self.ctx.clear_kv_cache_seq(Some(0), Some(think_start as u32), Some(self.n_cur as u32))?;
-            self.ctx.kv_cache_seq_add(0, Some(self.n_cur as u32), None, -(len as i32))?;
+            self.ctx.clear_kv_cache_seq(
+                Some(0),
+                Some(think_start as u32),
+                Some(self.n_cur as u32),
+            )?;
+            self.ctx
+                .kv_cache_seq_add(0, Some(self.n_cur as u32), None, -(len as i32))?;
             self.n_cur = think_start;
         }
 
         // 添加 im_end
-        let end_tokens = self.model.model.str_to_token("<|im_end|>\n", AddBos::Never).map_err(|e| anyhow::anyhow!(e))?;
+        let end_tokens = self
+            .model
+            .model
+            .str_to_token("<|im_end|>\n", AddBos::Never)
+            .map_err(|e| anyhow::anyhow!(e))?;
         batch.clear();
         for (i, &t) in end_tokens.iter().enumerate() {
             batch.add(t, (self.n_cur + i) as i32, &[0], i == end_tokens.len() - 1)?;
