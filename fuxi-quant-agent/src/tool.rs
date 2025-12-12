@@ -125,9 +125,20 @@ pub struct ToolResult {
     pub content: Value,
 }
 
-/// 生成带工具的 System Prompt
-///
-/// 格式参考 Qwen3 官方 chat template (Hermes 风格)
+/// 生成单个工具的 ReAct 格式描述
+fn format_tool_desc(tool: &Tool) -> String {
+    let params_json = serde_json::to_string(&tool.function.parameters).unwrap_or_default();
+    format!(
+        "{}: Call this tool to interact with the {} API. What is the {} API useful for? {} Parameters: {}",
+        tool.function.name,
+        tool.function.name,
+        tool.function.name,
+        tool.function.description,
+        params_json
+    )
+}
+
+/// 生成带工具的 System Prompt (ReAct 模式)
 pub fn build_tool_system_prompt(system_content: Option<&str>, tools: &[Tool]) -> String {
     let mut prompt = String::new();
 
@@ -137,73 +148,92 @@ pub fn build_tool_system_prompt(system_content: Option<&str>, tools: &[Tool]) ->
         prompt.push_str("\n\n");
     }
 
-    // 添加工具说明
-    prompt.push_str("# Tools\n\n");
-    prompt.push_str("You have access to the following tools. **You MUST use tools when needed** - do not make up information.\n\n");
-    prompt.push_str("For example:\n");
-    prompt.push_str("- When asked about current time/date, you MUST call `get_current_time`\n");
-    prompt.push_str("- Never guess or hallucinate real-time information\n\n");
+    // 生成工具描述列表
+    let tool_descs: Vec<String> = tools.iter().map(format_tool_desc).collect();
+    let tool_names: Vec<&str> = tools.iter().map(|t| t.function.name.as_str()).collect();
+
+    // ReAct 提示词模板
+    prompt.push_str("Answer the following questions as best you can. You have access to the following tools:\n\n");
+    prompt.push_str(&tool_descs.join("\n"));
+    prompt.push_str("\n\nUse the following format:\n\n");
+    prompt.push_str("Question: the input question you must answer\n");
+    prompt.push_str("Thought: you should always think about what to do\n");
+    prompt.push_str(&format!(
+        "Action: the action to take, should be one of [{}]\n",
+        tool_names.join(", ")
+    ));
+    prompt.push_str("Action Input: the input to the action\n");
+    prompt.push_str("Observation: the result of the action\n");
     prompt.push_str(
-        "You are provided with function signatures within <tools></tools> XML tags:\n<tools>",
+        "... (this Thought/Action/Action Input/Observation can be repeated zero or more times)\n",
     );
-
-    // 添加每个工具的 JSON 定义
-    for tool in tools {
-        prompt.push('\n');
-        if let Ok(json) = serde_json::to_string(tool) {
-            prompt.push_str(&json);
-        }
-    }
-
-    prompt.push_str("\n</tools>\n\n");
-    prompt.push_str("For each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:\n");
-    prompt.push_str("<tool_call>\n");
-    prompt.push_str(r#"{"name": <function-name>, "arguments": <args-json-object>}"#);
-    prompt.push_str("\n</tool_call>");
+    prompt.push_str("Thought: I now know the final answer\n");
+    prompt.push_str("Final Answer: the final answer to the original input question\n\n");
+    prompt.push_str("Begin!");
 
     prompt
 }
 
-/// 解析模型输出中的工具调用
+/// 解析模型输出中的工具调用 (ReAct 格式)
 ///
-/// 查找所有 `<tool_call>...</tool_call>` 块并解析
+/// 查找 `Action:` 和 `Action Input:` 并解析
 pub fn parse_tool_calls(output: &str) -> Vec<ToolCall> {
     let mut calls = Vec::new();
-    let mut search_start = 0;
 
-    while let Some(start) = output[search_start..].find("<tool_call>") {
-        let abs_start = search_start + start + "<tool_call>".len();
-        if let Some(end) = output[abs_start..].find("</tool_call>") {
-            let abs_end = abs_start + end;
-            let json_str = output[abs_start..abs_end].trim();
+    // 查找最后一个 Action/Action Input 对
+    if let Some(action_pos) = output.rfind("Action:") {
+        let action_line_start = action_pos + "Action:".len();
+        let action_line_end = output[action_line_start..]
+            .find('\n')
+            .map(|p| action_line_start + p)
+            .unwrap_or(output.len());
+        let action_name = output[action_line_start..action_line_end].trim();
 
-            if let Ok(call) = serde_json::from_str::<ToolCall>(json_str) {
-                calls.push(call);
+        // 查找对应的 Action Input
+        if let Some(input_pos) = output[action_line_end..].find("Action Input:") {
+            let input_start = action_line_end + input_pos + "Action Input:".len();
+            // Action Input 可能是单行或多行 JSON
+            let input_end = output[input_start..]
+                .find("\nObservation:")
+                .or_else(|| output[input_start..].find("\nThought:"))
+                .map(|p| input_start + p)
+                .unwrap_or(output.len());
+            let input_str = output[input_start..input_end].trim();
+
+            // 解析 Action Input 为 JSON
+            let arguments: Value = if input_str.starts_with('{') {
+                serde_json::from_str(input_str).unwrap_or(Value::Object(Default::default()))
+            } else {
+                // 如果不是 JSON，包装为字符串参数
+                serde_json::json!({ "input": input_str })
+            };
+
+            if !action_name.is_empty() {
+                calls.push(ToolCall {
+                    name: action_name.to_string(),
+                    arguments,
+                });
             }
-
-            search_start = abs_end + "</tool_call>".len();
-        } else {
-            break;
         }
     }
 
     calls
 }
 
-/// 检查输出是否包含工具调用
+/// 检查输出是否包含工具调用 (ReAct 格式)
 pub fn has_tool_call(output: &str) -> bool {
-    output.contains("<tool_call>")
+    output.contains("Action:") && output.contains("Action Input:")
 }
 
-/// 生成工具结果消息内容
+/// 生成工具结果消息内容 (ReAct 格式)
 ///
-/// 格式: `<tool_response>\n{json}\n</tool_response>`
+/// 格式: `Observation: {result}`
 pub fn format_tool_response(result: &ToolResult) -> String {
-    let json = serde_json::to_string(&result.content).unwrap_or_default();
-    format!("<tool_response>\n{}\n</tool_response>", json)
+    let json = serde_json::to_string_pretty(&result.content).unwrap_or_default();
+    format!("Observation: {}", json)
 }
 
-/// 批量格式化多个工具结果
+/// 批量格式化多个工具结果 (ReAct 格式)
 pub fn format_tool_responses(results: &[ToolResult]) -> String {
     results
         .iter()
@@ -212,18 +242,18 @@ pub fn format_tool_responses(results: &[ToolResult]) -> String {
         .join("\n")
 }
 
-/// 从输出中提取非工具调用的文本内容
+/// 从输出中提取 Final Answer (ReAct 格式)
 pub fn extract_content_without_tool_calls(output: &str) -> String {
-    let mut result = output.to_string();
-    while let Some(start) = result.find("<tool_call>") {
-        if let Some(end) = result[start..].find("</tool_call>") {
-            let abs_end = start + end + "</tool_call>".len();
-            result = format!("{}{}", &result[..start], &result[abs_end..]);
-        } else {
-            break;
-        }
+    // 查找 Final Answer
+    if let Some(pos) = output.find("Final Answer:") {
+        let start = pos + "Final Answer:".len();
+        return output[start..].trim().to_string();
     }
-    result.trim().to_string()
+    // 如果没有 Final Answer，返回去掉 Action 部分的内容
+    if let Some(pos) = output.find("Action:") {
+        return output[..pos].trim().to_string();
+    }
+    output.trim().to_string()
 }
 
 /// 内置工具模块
@@ -321,26 +351,38 @@ mod tests {
         ];
 
         let prompt = build_tool_system_prompt(Some("You are a helpful assistant."), &tools);
-        assert!(prompt.contains("# Tools"));
-        assert!(prompt.contains("<tools>"));
+        assert!(prompt.contains("Answer the following questions"));
         assert!(prompt.contains("get_weather"));
-        assert!(prompt.contains("<tool_call>"));
+        assert!(prompt.contains("Action:"));
+        assert!(prompt.contains("Action Input:"));
+        assert!(prompt.contains("Observation:"));
+        assert!(prompt.contains("Final Answer:"));
     }
 
     #[test]
-    fn test_parse_tool_calls() {
-        let output = r#"Let me check the weather.
-<tool_call>
-{"name": "get_weather", "arguments": {"city": "Beijing"}}
-</tool_call>
-<tool_call>
-{"name": "get_weather", "arguments": {"city": "Shanghai"}}
-</tool_call>"#;
+    fn test_parse_tool_calls_react() {
+        let output = r#"Thought: I need to check the weather in Beijing.
+Action: get_weather
+Action Input: {"city": "Beijing"}
+"#;
 
         let calls = parse_tool_calls(output);
-        assert_eq!(calls.len(), 2);
+        assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].name, "get_weather");
-        assert_eq!(calls[1].arguments["city"], "Shanghai");
+        assert_eq!(calls[0].arguments["city"], "Beijing");
+    }
+
+    #[test]
+    fn test_parse_tool_calls_simple_input() {
+        let output = r#"Thought: I need to search for something.
+Action: search
+Action Input: rust programming
+"#;
+
+        let calls = parse_tool_calls(output);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].name, "search");
+        assert_eq!(calls[0].arguments["input"], "rust programming");
     }
 
     #[test]
@@ -351,8 +393,16 @@ mod tests {
         };
 
         let response = format_tool_response(&result);
-        assert!(response.contains("<tool_response>"));
-        assert!(response.contains("</tool_response>"));
+        assert!(response.starts_with("Observation:"));
         assert!(response.contains("sunny"));
+    }
+
+    #[test]
+    fn test_extract_final_answer() {
+        let output = r#"Thought: I now know the final answer.
+Final Answer: The weather in Beijing is sunny with 25°C."#;
+
+        let answer = extract_content_without_tool_calls(output);
+        assert_eq!(answer, "The weather in Beijing is sunny with 25°C.");
     }
 }
