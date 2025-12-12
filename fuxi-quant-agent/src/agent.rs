@@ -205,12 +205,12 @@ impl Agent {
         let mut buffer = String::new();
         let mut full_response = String::new();
 
+        // Qwen3 Thinking Mode: temp=0.6, top_p=0.95, top_k=20, min_p=0
         let mut sampler = LlamaSampler::chain_simple([
             LlamaSampler::top_k(20),
             LlamaSampler::top_p(0.95, 1),
             LlamaSampler::min_p(0.0, 1),
             LlamaSampler::temp(0.6),
-            LlamaSampler::penalties(-1, 1.0, 0.0, 0.0),
             LlamaSampler::dist(self.n_cur as u32),
         ]);
 
@@ -426,12 +426,12 @@ impl Agent {
         let mut in_thinking = true;
         let mut buffer = String::new();
 
+        // Qwen3 Thinking Mode: temp=0.6, top_p=0.95, top_k=20, min_p=0
         let mut sampler = LlamaSampler::chain_simple([
             LlamaSampler::top_k(20),
             LlamaSampler::top_p(0.95, 1),
             LlamaSampler::min_p(0.0, 1),
             LlamaSampler::temp(0.6),
-            LlamaSampler::penalties(-1, 1.0, 0.0, 0.0),
             LlamaSampler::dist(self.n_cur as u32),
         ]);
 
